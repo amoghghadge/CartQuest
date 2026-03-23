@@ -4,6 +4,8 @@ import CoreLocation
 
 struct RunDetailView: View {
     @State private var viewModel: RunDetailViewModel
+    @State private var shareImage: UIImage?
+    @State private var showShareSheet = false
 
     init(runId: String) {
         _viewModel = State(initialValue: RunDetailViewModel(runId: runId))
@@ -27,18 +29,38 @@ struct RunDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                // Placeholder for Task 24 share card generation
                 Button {
-                    // TODO: Implement share card (Task 24)
+                    if let run = viewModel.run,
+                       let image = ShareCardRenderer.render(run: run) {
+                        shareImage = image
+                        showShareSheet = true
+                    }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let shareImage {
+                ActivityViewController(activityItems: [shareImage])
             }
         }
         .task {
             await viewModel.loadRun()
         }
     }
+}
+
+// MARK: - Activity View Controller
+
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Content
