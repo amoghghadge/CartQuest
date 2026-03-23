@@ -1,3 +1,7 @@
-.superpowers/
-docs/
+# iOS secrets
 CartQuestiOS/CartQuestiOS/Secrets.xcconfig
+CartQuestiOS/CartQuestiOS/GoogleService-Info.plist
+
+# Android secrets
+CartQuestAndroid/secrets.properties
+CartQuestAndroid/app/google-services.json
