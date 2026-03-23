@@ -15,10 +15,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.amoghghadge.cartquestandroid.ui.cart.CartBuilderScreen
+import com.amoghghadge.cartquestandroid.ui.route.RouteMapScreen
 
 @Composable
 fun AppNavigation() {
@@ -68,8 +71,13 @@ fun AppNavigation() {
                         }
                     )
                 }
-                composable(Screen.RouteMap.route) {
-                    Text(text = "RouteMap")
+                composable(
+                    route = Screen.RouteMap.route,
+                    arguments = listOf(navArgument("cartId") { type = NavType.StringType })
+                ) {
+                    RouteMapScreen(
+                        onNavigateBack = { shopNavController.popBackStack() }
+                    )
                 }
             }
             1 -> NavHost(
