@@ -97,7 +97,7 @@ private struct FeedCard: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(Color.accentColor.opacity(0.12))
-                                .foregroundStyle(.accentColor)
+                                .foregroundStyle(Color.accentColor)
                                 .clipShape(Capsule())
                         }
                     }

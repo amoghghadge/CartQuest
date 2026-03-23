@@ -60,7 +60,7 @@ class ShareCardRenderer {
     @MainActor
     static func render(run: CompletedRun) -> UIImage? {
         let renderer = ImageRenderer(content: ShareCardView(run: run))
-        renderer.scale = UIScreen.main.scale
+        renderer.scale = 3.0
         return renderer.uiImage
     }
 }

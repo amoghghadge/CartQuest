@@ -1,11 +1,24 @@
 import Foundation
 import FirebaseAuth
 
-enum AuthState {
+enum AuthState: Equatable {
     case unauthenticated
     case loading
     case authenticated(FirebaseAuth.User)
     case error(String)
+
+    static func == (lhs: AuthState, rhs: AuthState) -> Bool {
+        switch (lhs, rhs) {
+        case (.unauthenticated, .unauthenticated), (.loading, .loading):
+            return true
+        case (.authenticated(let a), .authenticated(let b)):
+            return a.uid == b.uid
+        case (.error(let a), .error(let b)):
+            return a == b
+        default:
+            return false
+        }
+    }
 }
 
 @Observable
