@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.amoghghadge.cartquestandroid.ui.cart.CartBuilderScreen
 
 @Composable
 fun AppNavigation() {
@@ -61,7 +62,11 @@ fun AppNavigation() {
                 modifier = Modifier.padding(innerPadding)
             ) {
                 composable(Screen.CartBuilder.route) {
-                    Text(text = "CartBuilder")
+                    CartBuilderScreen(
+                        onNavigateToRoute = { cartId ->
+                            shopNavController.navigate(Screen.RouteMap.createRoute(cartId))
+                        }
+                    )
                 }
                 composable(Screen.RouteMap.route) {
                     Text(text = "RouteMap")
