@@ -26,7 +26,7 @@ struct CartQuestiOSApp: App {
             case .loading:
                 ProgressView()
             case .authenticated:
-                Text("Welcome!") // Placeholder for main app
+                AppTabView()
             }
         }
     }
