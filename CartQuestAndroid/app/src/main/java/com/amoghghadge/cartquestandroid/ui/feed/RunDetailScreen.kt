@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import android.content.Intent
+import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -30,8 +32,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amoghghadge.cartquestandroid.data.model.CompletedRun
 import com.amoghghadge.cartquestandroid.data.model.StoreStop
@@ -44,6 +48,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,6 +60,7 @@ fun RunDetailScreen(
     viewModel: RunDetailViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -69,7 +75,12 @@ fun RunDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.onShareClicked() }) {
+                    IconButton(onClick = {
+                        val currentState = state
+                        if (currentState is RunDetailState.Loaded) {
+                            shareRun(currentState.run, context)
+                        }
+                    }) {
                         Icon(
                             imageVector = Icons.Default.Share,
                             contentDescription = "Share"
@@ -280,6 +291,20 @@ private fun RunDetailMap(
             )
         }
     }
+}
+
+private fun shareRun(run: CompletedRun, context: android.content.Context) {
+    val bitmap = ShareCardRenderer.render(run, context)
+    val file = File(context.cacheDir, "share_images/trip_${run.id}.png")
+    file.parentFile?.mkdirs()
+    file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "image/png"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, "Share Shopping Trip"))
 }
 
 /**
