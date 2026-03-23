@@ -8,7 +8,7 @@ This document provides a detailed walkthrough of every architectural layer, data
 
 - [End-to-End User Flow](#end-to-end-user-flow)
 - [Authentication Pipeline](#authentication-pipeline)
-- [Cart Builder: Search → Mutate → Persist](#cart-builder-search--mutate--persist)
+- [Shop Flow: Search → Cart → Checkout](#shop-flow-search--cart--checkout)
 - [Route Optimization Pipeline](#route-optimization-pipeline)
 - [Map Rendering & Navigation Handoff](#map-rendering--navigation-handoff)
 - [Community Feed & Sharing](#community-feed--sharing)
@@ -31,16 +31,18 @@ The complete user journey through the app follows this sequence:
        ├── Email/Password sign up → Create Firebase user + Firestore user doc
        └── Email/Password sign in → Authenticate against Firebase
 
-2. CART BUILDING (Tab 1: Shop)
-   CartBuilderView/Screen displayed
+2. SHOP (Tab 1: Shop)
+   ShopHomeView/ShopHomeScreen displayed (Google-style centered search)
+   ├── On init: fetch nearest Kroger store for availability data
    ├── Load active cart from Firestore (status == "active")
    │   └── If none exists, start with empty cart
-   ├── User searches for product → Debounced Kroger API call
-   ├── User taps product → Added to cart.items array
-   ├── User can add substitutes → Opens search in substitute mode
-   ├── User adjusts quantity → Stepper control (1-99)
+   ├── User types search → Kroger API call (location-aware, limit 50)
+   ├── Results shown in 2-column grid with availability badges
+   ├── User taps "Add to Cart" → Added to cart.items array
+   ├── User adjusts quantity via stepper on product cards
    ├── Every mutation → Debounced Firestore save (800ms iOS / 1000ms Android)
-   └── User taps "Find Route" → Navigate to RouteMapView/Screen
+   ├── Cart icon badge shows item count across all screens
+   └── User taps "Find Route" in CartView/CartScreen → Navigate to RouteMapView/Screen
 
 3. ROUTE OPTIMIZATION (RouteMapView/Screen)
    Triggered automatically on screen load:
@@ -63,7 +65,7 @@ The complete user journey through the app follows this sequence:
    ├── Calculate total cost from assigned item prices
    ├── Save CompletedRun to Firestore /runs collection
    ├── Mark cart as completed (status = "completed")
-   └── Navigate back to CartBuilder (fresh cart)
+   └── Navigate back to ShopHome (fresh cart)
 
 5. COMMUNITY FEED (Tab 2: Community)
    CommunityFeedView/Screen displayed
@@ -75,6 +77,12 @@ The complete user journey through the app follows this sequence:
        ├── Display items grouped by store
        ├── Display mini map with store markers
        └── Share button → Generate share card image → Native share sheet
+
+6. PROFILE (Tab 3: Profile)
+   ProfileView/ProfileScreen displayed
+   ├── Shows user avatar, display name, email from Firebase Auth
+   ├── Shows user ID (truncated) and email verification status
+   └── "Log Out" button → Firebase signOut → returns to LoginView/LoginScreen
 ```
 
 ---
@@ -135,30 +143,34 @@ Google Sign-In Flow:
 
 ---
 
-## Cart Builder: Search → Mutate → Persist
+## Shop Flow: Search → Cart → Checkout
+
+The Shop tab uses a shared ViewModel (`ShopViewModel` on both platforms) that manages search state, cart state, and location-aware product availability across a 3-screen NavigationStack: ShopHomeView → ProductListView → CartView (iOS) / ShopHomeScreen → ProductListScreen → CartScreen (Android).
+
+### Location-Aware Search
+
+On ViewModel init, the nearest Kroger store is fetched using the device's GPS coordinates. This `nearbyLocationId` is passed to all subsequent product searches, enabling the Kroger API to return per-store fulfillment data (in-store availability).
 
 ### Search Pipeline
 
 ```
-User types in search bar
+User types in search bar (ShopHomeView) and hits Search
     │
     ▼
-searchQuery property setter fires
-    │
-    ▼
-debouncedSearch() called
+search() called
 ├── Cancel any in-flight searchTask
-├── If query is empty → clear results, return
-├── Start new Task with delay:
-│   ├── Sleep 400ms (iOS) / 500ms (Android)
-│   ├── Check cancellation → abort if cancelled
-│   └── Call krogerService.searchProducts(term: query)
+├── If query is empty → return
+├── Start new Task:
+│   └── Call krogerService.searchProducts(term: query, locationId: nearbyLocationId)
 │       ├── Ensure valid OAuth token (refresh if expired)
-│       ├── GET /v1/products?filter.term={query}&filter.limit=20
+│       ├── GET /v1/products?filter.term={query}&filter.locationId={id}&filter.limit=50
 │       └── Decode response → [KrogerProduct]
     │
     ▼
-searchResults updated → UI re-renders with product list
+searchResults mapped to [ProductResult] with isAvailable flag
+    │
+    ▼
+Navigate to ProductListView/ProductListScreen → 2-column grid with availability badges
 ```
 
 ### Mutation Operations
@@ -168,10 +180,10 @@ All cart mutations follow the same pattern: mutate the in-memory `cart.items` ar
 | Operation | Behavior |
 |-----------|----------|
 | **Add item** | Append `CartItem` to `cart.items` with `productId`, `name`, `brand`, `imageUrl` from Kroger product |
-| **Add substitute** | Set `addingSubstituteForIndex`, re-enter search mode. Next product selected becomes a `Substitute` appended to `cart.items[index].substitutes` |
-| **Remove item** | Remove at index from `cart.items` |
-| **Remove substitute** | Remove at sub-index from `cart.items[index].substitutes` |
-| **Update quantity** | Set `cart.items[index].quantity = max(1, newValue)` |
+| **Remove item** | Remove at index from `cart.items` (or decrement to 0) |
+| **Increment quantity** | `cart.items[index].quantity += 1` via stepper on product card |
+| **Decrement quantity** | If quantity is 1, remove item; otherwise `cart.items[index].quantity -= 1` |
+| **Update quantity** | Set `cart.items[index].quantity` directly; if < 1, remove item |
 
 ### Persistence Pipeline
 
@@ -506,7 +518,7 @@ interface KrogerApiService {
         @Header("Authorization") auth: String,
         @Query("filter.term") term: String,
         @Query("filter.locationId") locationId: String,
-        @Query("filter.limit") limit: Int = 20
+        @Query("filter.limit") limit: Int = 50
     ): KrogerProductResponse
 
     companion object {
