@@ -71,7 +71,7 @@ struct ProductCard: View {
                     Button(action: onDecrement) {
                         Image(systemName: "minus.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(.accent)
+                            .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.borderless)
 
@@ -86,7 +86,7 @@ struct ProductCard: View {
                     Button(action: onIncrement) {
                         Image(systemName: "plus.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(.accent)
+                            .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.borderless)
                 }
