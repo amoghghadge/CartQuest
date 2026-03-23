@@ -63,7 +63,7 @@ struct CartBuilderView: View {
                 if !viewModel.cart.items.isEmpty {
                     Section {
                         NavigationLink {
-                            Text("Route Map")
+                            RouteMapView(cartId: viewModel.cart.id)
                         } label: {
                             Label("Find Route", systemImage: "map")
                         }
