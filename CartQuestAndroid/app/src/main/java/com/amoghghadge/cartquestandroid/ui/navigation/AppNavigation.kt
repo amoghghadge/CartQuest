@@ -21,6 +21,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.amoghghadge.cartquestandroid.ui.cart.CartBuilderScreen
+import com.amoghghadge.cartquestandroid.ui.feed.CommunityFeedScreen
+import com.amoghghadge.cartquestandroid.ui.feed.RunDetailScreen
 import com.amoghghadge.cartquestandroid.ui.route.RouteMapScreen
 
 @Composable
@@ -86,10 +88,19 @@ fun AppNavigation() {
                 modifier = Modifier.padding(innerPadding)
             ) {
                 composable(Screen.CommunityFeed.route) {
-                    Text(text = "CommunityFeed")
+                    CommunityFeedScreen(
+                        onNavigateToRunDetail = { runId ->
+                            communityNavController.navigate(Screen.RunDetail.createRoute(runId))
+                        }
+                    )
                 }
-                composable(Screen.RunDetail.route) {
-                    Text(text = "RunDetail")
+                composable(
+                    route = Screen.RunDetail.route,
+                    arguments = listOf(navArgument("runId") { type = NavType.StringType })
+                ) {
+                    RunDetailScreen(
+                        onNavigateBack = { communityNavController.popBackStack() }
+                    )
                 }
             }
         }

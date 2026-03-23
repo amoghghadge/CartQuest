@@ -19,6 +19,11 @@ class RunsRepository {
         return docRef.id
     }
 
+    suspend fun getRunById(runId: String): CompletedRun? {
+        val doc = db.collection("runs").document(runId).get().await()
+        return doc.toObject<CompletedRun>()?.copy(id = doc.id)
+    }
+
     fun getRecentRuns(limit: Int = 20): Flow<List<CompletedRun>> {
         return db.collection("runs")
             .orderBy("completedAt", Query.Direction.DESCENDING)
