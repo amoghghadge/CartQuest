@@ -6,10 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -18,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amoghghadge.cartquestandroid.ui.auth.AuthState
 import com.amoghghadge.cartquestandroid.ui.auth.LoginScreen
 import com.amoghghadge.cartquestandroid.ui.auth.LoginViewModel
+import com.amoghghadge.cartquestandroid.ui.navigation.AppNavigation
 import com.amoghghadge.cartquestandroid.ui.theme.CartQuestAndroidTheme
 
 class MainActivity : ComponentActivity() {
@@ -42,12 +40,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     is AuthState.Authenticated -> {
-                        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                            Text(
-                                text = "Welcome!",
-                                modifier = Modifier.padding(innerPadding)
-                            )
-                        }
+                        AppNavigation()
                     }
                 }
             }
