@@ -9,11 +9,18 @@ struct LoginView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 24) {
-                // App title
+                // App title + icon
                 Text("CartQuest")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .padding(.top, 60)
+
+                Image("AppIconImage")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 100, height: 100)
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
+                    .padding(.top, 8)
 
                 Spacer()
 
@@ -136,4 +143,8 @@ struct LoginView: View {
             Text(errorMessage)
         }
     }
+}
+
+#Preview {
+    LoginView(viewModel: LoginViewModel())
 }

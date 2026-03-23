@@ -40,7 +40,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     is AuthState.Authenticated -> {
-                        AppNavigation()
+                        AppNavigation(onLoggedOut = { loginViewModel.signOut() })
                     }
                 }
             }

@@ -2,7 +2,7 @@ import Foundation
 import FirebaseFirestore
 
 class RunsRepository {
-    private let db = Firestore.firestore()
+    private lazy var db = Firestore.firestore()
 
     func saveCompletedRun(_ run: CompletedRun) async throws -> String {
         let docRef = db.collection("runs").document()

@@ -33,6 +33,7 @@ struct CommunityFeedView: View {
         .listStyle(.plain)
         .searchable(text: $viewModel.searchText, prompt: "Search by user, store, or product")
         .navigationTitle("Community")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: String.self) { runId in
             RunDetailView(runId: runId)
         }
@@ -134,5 +135,11 @@ private struct FeedCard: View {
 
     private var totalItemCount: Int {
         run.stores.reduce(0) { $0 + $1.items.count }
+    }
+}
+
+#Preview {
+    NavigationStack {
+        CommunityFeedView()
     }
 }

@@ -16,7 +16,7 @@ interface KrogerApiService {
         @Header("Authorization") auth: String,
         @Query("filter.term") term: String,
         @Query("filter.locationId") locationId: String? = null,
-        @Query("filter.limit") limit: Int = 20
+        @Query("filter.limit") limit: Int = 50
     ): KrogerProductResponse
 
     @GET("v1/locations")

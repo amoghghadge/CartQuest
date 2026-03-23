@@ -18,7 +18,7 @@ class KrogerService {
 
     // MARK: - Public API
 
-    func searchProducts(term: String, locationId: String? = nil, limit: Int = 20) async throws -> [KrogerProduct] {
+    func searchProducts(term: String, locationId: String? = nil, limit: Int = 50) async throws -> [KrogerProduct] {
         let token = try await getToken()
         var components = URLComponents(string: "\(baseURL)/v1/products")!
         var queryItems = [

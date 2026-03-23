@@ -45,11 +45,11 @@ class RouteMapViewModel {
         cartRepository: CartRepository = CartRepository(),
         runsRepository: RunsRepository = RunsRepository(),
         krogerService: KrogerService = KrogerService(
-            clientId: "KROGER_CLIENT_ID_PLACEHOLDER",
-            clientSecret: "KROGER_CLIENT_SECRET_PLACEHOLDER"
+            clientId: Bundle.main.infoDictionary?["KROGER_CLIENT_ID"] as? String ?? "",
+            clientSecret: Bundle.main.infoDictionary?["KROGER_CLIENT_SECRET"] as? String ?? ""
         ),
         locationService: LocationService = LocationService(),
-        directionsService: DirectionsService = DirectionsService(apiKey: "GOOGLE_MAPS_API_KEY_PLACEHOLDER"),
+        directionsService: DirectionsService = DirectionsService(apiKey: Bundle.main.infoDictionary?["GOOGLE_MAPS_API_KEY"] as? String ?? ""),
         routeOptimizer: RouteOptimizer = RouteOptimizer()
     ) {
         self.cartId = cartId

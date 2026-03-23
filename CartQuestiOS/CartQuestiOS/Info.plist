@@ -4,5 +4,20 @@
 <dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>CartQuest needs your location to find nearby grocery stores and plan your shopping route.</string>
+	<key>KROGER_CLIENT_ID</key>
+	<string>$(KROGER_CLIENT_ID)</string>
+	<key>KROGER_CLIENT_SECRET</key>
+	<string>$(KROGER_CLIENT_SECRET)</string>
+	<key>GOOGLE_MAPS_API_KEY</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.21840691019-ks2g7d2lgt3hrb9spelq7ksltb2qtk59</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

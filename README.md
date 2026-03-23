@@ -14,7 +14,7 @@
 
 <video src="android.mp4" width="340"></video>
 
-Both demos walk through the full user journey: **authentication → cart building with Kroger product search → route optimization across nearby stores → Google Maps navigation → trip completion → community feed browsing and sharing.**
+Both demos walk through the full user journey: **authentication → product search with location-aware availability → cart building → route optimization across nearby stores → Google Maps navigation → trip completion → community feed browsing and sharing.**
 
 ---
 
@@ -42,8 +42,8 @@ Both demos walk through the full user journey: **authentication → cart buildin
 
 Grocery shopping across multiple stores is a constrained optimization problem: each store carries different products at different prices, and driving between stores has a real time cost. CartQuest solves this by:
 
-1. Letting users build a shopping cart with priority-ordered product substitutes
-2. Querying real-time product availability across nearby stores (Kroger API)
+1. Letting users search products with real-time in-store availability badges, then build a cart
+2. Querying product availability scoped to the nearest store location (Kroger API)
 3. Solving a **minimum-cost set cover** variant to find the smallest set of stores that covers every cart item
 4. Using the **Google Directions API** with waypoint optimization to minimize total drive time across feasible store subsets
 5. Rendering the optimal route on an interactive map with turn-by-turn navigation handoff
@@ -113,15 +113,20 @@ This pattern eliminates impossible states (e.g., a loading indicator shown along
 CartQuestiOSApp (auth state gate)
 ├── LoginView                        [unauthenticated]
 └── AppTabView                       [authenticated]
-    ├── Tab 1: Cart Builder
+    ├── Tab 1: Shop
     │   └── NavigationStack
+    │       ├── ShopHomeView         [centered search bar]
+    │       ├── ProductListView      [grid results + availability badges]
+    │       ├── CartView             [cart items + "Find Route" checkout]
     │       └── RouteMapView         [push via NavigationLink]
-    └── Tab 2: Community Feed
-        └── NavigationStack
-            └── RunDetailView        [push via navigationDestination]
+    ├── Tab 2: Community Feed
+    │   └── NavigationStack
+    │       └── RunDetailView        [push via navigationDestination]
+    └── Tab 3: Profile
+        └── ProfileView             [account info + logout]
 ```
 
-The app root (`CartQuestiOSApp`) observes `LoginViewModel.authState` and conditionally renders either the login flow or the main tab interface. Each tab maintains its own `NavigationStack`, providing independent navigation history per tab — standard iOS UX behavior.
+The app root (`CartQuestiOSApp`) observes `LoginViewModel.authState` and conditionally renders either the login flow or the main tab interface. Each tab maintains its own `NavigationStack`, providing independent navigation history per tab — standard iOS UX behavior. The Shop tab uses a shared `ShopViewModel` that manages search, cart state, and location-aware product availability across all three screens in the navigation stack.
 
 ### UIKit Interop
 
@@ -194,15 +199,19 @@ MainActivity (auth state gate)
 └── AppNavigation                        [authenticated]
     ├── Tab 1: Shop
     │   └── NavHost
-    │       ├── CartBuilderScreen        [start]
+    │       ├── ShopHomeScreen           [centered search bar]
+    │       ├── ProductListScreen        [grid results + availability]
+    │       ├── CartScreen               [cart items + checkout]
     │       └── RouteMapScreen/{cartId}  [navigate with arg]
-    └── Tab 2: Community
-        └── NavHost
-            ├── CommunityFeedScreen      [start]
-            └── RunDetailScreen/{runId}  [navigate with arg]
+    ├── Tab 2: Community
+    │   └── NavHost
+    │       ├── CommunityFeedScreen      [start]
+    │       └── RunDetailScreen/{runId}  [navigate with arg]
+    └── Tab 3: Profile
+        └── ProfileScreen               [account info + logout]
 ```
 
-Navigation uses **Jetpack Navigation Compose** with a sealed `Screen` class for type-safe route definitions. Each tab has its own `NavHost`, and route parameters (`cartId`, `runId`) are extracted via `SavedStateHandle` in ViewModels — enabling deep linking and process death restoration.
+Navigation uses **Jetpack Navigation Compose** with a sealed `Screen` class for type-safe route definitions. The Shop tab uses a shared `ShopViewModel` across its NavHost, with `LocationService` initialized via `LaunchedEffect` on first composition. Route parameters (`cartId`, `runId`) are extracted via `SavedStateHandle` in ViewModels — enabling deep linking and process death restoration.
 
 ### Authentication: Credential Manager
 
@@ -599,8 +608,8 @@ viewModelScope.launch {
 ### Lazy Rendering
 
 Both platforms use lazy containers for scrollable content:
-- **iOS:** `LazyVStack` in route map for store stop cards
-- **Android:** `LazyColumn` for feed items, cart items, and store stops
+- **iOS:** `LazyVGrid` (2-column) for product search results, `LazyVStack` for store stop cards
+- **Android:** `LazyVerticalGrid` (2-column) for product search results, `LazyColumn` for feed items, cart items, and store stops
 
 This ensures only visible items are composed/rendered, keeping memory usage flat regardless of list size.
 
@@ -678,15 +687,18 @@ CartQuest/
 │       │
 │       └── Views/
 │           ├── Navigation/
-│           │   └── AppTabView.swift             # Two-tab layout
+│           │   └── AppTabView.swift             # Three-tab layout (Shop, Community, Profile)
 │           ├── Auth/
 │           │   ├── LoginView.swift              # Email/password + Google Sign-In UI
 │           │   └── LoginViewModel.swift         # Auth state machine
-│           ├── Cart/
-│           │   ├── CartBuilderView.swift        # Main cart screen
-│           │   ├── CartBuilderViewModel.swift   # Search, mutations, persistence
-│           │   ├── CartItemRow.swift            # Cart item card + substitutes
-│           │   └── ProductSearchResults.swift   # Search results overlay
+│           ├── Shop/
+│           │   ├── ShopHomeView.swift           # Google-style centered search landing
+│           │   ├── ProductListView.swift        # Grid results with availability badges
+│           │   ├── ProductCard.swift            # Product card with add-to-cart stepper
+│           │   ├── CartView.swift               # Cart items + "Find Route" checkout
+│           │   └── ShopViewModel.swift          # Shared VM: search, cart, location
+│           ├── Profile/
+│           │   └── ProfileView.swift            # Account info + logout
 │           ├── Route/
 │           │   ├── RouteMapView.swift           # Google Maps + store cards
 │           │   ├── RouteMapViewModel.swift      # Route orchestration
@@ -732,11 +744,15 @@ CartQuest/
             ├── navigation/
             │   ├── AppNavigation.kt             # Bottom nav + per-tab NavHosts
             │   └── Screen.kt                    # Sealed route definitions
-            ├── cart/
-            │   ├── CartBuilderScreen.kt         # Main cart Compose screen
-            │   ├── CartBuilderViewModel.kt      # StateFlow state + debounced ops
-            │   ├── CartItemRow.kt               # Cart item card composable
-            │   └── ProductSearchResults.kt      # Search results composable
+            ├── shop/
+            │   ├── ShopHomeScreen.kt            # Centered search bar landing page
+            │   ├── ProductListScreen.kt         # Grid results with availability badges
+            │   ├── ProductCard.kt               # Product card composable
+            │   ├── CartScreen.kt                # Cart items + checkout button
+            │   └── ShopViewModel.kt             # Shared VM: search, cart, location
+            ├── profile/
+            │   ├── ProfileScreen.kt             # Account info + logout
+            │   └── ProfileViewModel.kt          # Profile state + signOut
             ├── route/
             │   ├── RouteMapScreen.kt            # Maps Compose + route display
             │   ├── RouteMapViewModel.kt         # Route orchestration

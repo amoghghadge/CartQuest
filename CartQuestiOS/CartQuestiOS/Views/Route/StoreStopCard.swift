@@ -65,3 +65,20 @@ struct StoreStopCard: View {
         .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
     }
 }
+
+#Preview {
+    StoreStopCard(
+        stopNumber: 1,
+        stop: StoreStop(
+            storeId: "s1",
+            storeName: "Kroger #123",
+            address: "123 Main St",
+            lat: 37.0,
+            lng: -122.0,
+            items: [
+                AssignedItem(productId: "p1", name: "Milk", brand: "Kroger", price: 3.99)
+            ]
+        )
+    )
+    .padding()
+}

@@ -6,7 +6,7 @@ import FirebaseFirestore
 private typealias AppUser = User
 
 class UserRepository {
-    private let db = Firestore.firestore()
+    private lazy var db = Firestore.firestore()
 
     func createUserDocument(user: FirebaseAuth.User) async throws {
         let userData = AppUser(

@@ -7,27 +7,41 @@
 
 import SwiftUI
 import FirebaseCore
-// import GoogleMaps  // will be needed when Google Maps SPM package is added
+import GoogleMaps
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+        if let key = Bundle.main.infoDictionary?["GOOGLE_MAPS_API_KEY"] as? String {
+            GMSServices.provideAPIKey(key)
+        }
+        return true
+    }
+}
 
 @main
 struct CartQuestiOSApp: App {
-    @State private var loginViewModel = LoginViewModel()
-
-    init() {
-        FirebaseApp.configure()
-        // GMSServices.provideAPIKey("your-api-key")  // TODO: configure when Google Maps SDK is added
-    }
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
         WindowGroup {
-            switch loginViewModel.authState {
-            case .unauthenticated, .error:
-                LoginView(viewModel: loginViewModel)
-            case .loading:
-                ProgressView()
-            case .authenticated:
-                AppTabView()
-            }
+            RootView()
+        }
+    }
+}
+
+struct RootView: View {
+    @State private var loginViewModel = LoginViewModel()
+
+    var body: some View {
+        switch loginViewModel.authState {
+        case .unauthenticated, .error:
+            LoginView(viewModel: loginViewModel)
+        case .loading:
+            ProgressView()
+        case .authenticated(_):
+            AppTabView(loginViewModel: loginViewModel)
         }
     }
 }

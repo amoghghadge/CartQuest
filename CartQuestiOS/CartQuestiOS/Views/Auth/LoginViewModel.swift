@@ -1,5 +1,7 @@
 import Foundation
 import FirebaseAuth
+import GoogleSignIn
+import FirebaseCore
 
 enum AuthState: Equatable {
     case unauthenticated
@@ -73,11 +75,44 @@ class LoginViewModel {
         }
     }
 
+    @MainActor
     func signInWithGoogle() {
-        // TODO: Implement Google Sign-In once GoogleSignIn-iOS SPM package is added
-        // Will use GIDSignIn to get ID token, then:
-        // let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
-        // try await Auth.auth().signIn(with: credential)
+        authState = .loading
+        Task {
+            do {
+                guard let clientID = FirebaseApp.app()?.options.clientID else {
+                    authState = .error("Missing Firebase client ID")
+                    return
+                }
+
+                let config = GIDConfiguration(clientID: clientID)
+                GIDSignIn.sharedInstance.configuration = config
+
+                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                      let rootViewController = windowScene.windows.first?.rootViewController else {
+                    authState = .error("Cannot find root view controller")
+                    return
+                }
+
+                let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController)
+
+                guard let idToken = result.user.idToken?.tokenString else {
+                    authState = .error("Missing Google ID token")
+                    return
+                }
+
+                let credential = GoogleAuthProvider.credential(
+                    withIDToken: idToken,
+                    accessToken: result.user.accessToken.tokenString
+                )
+
+                let authResult = try await Auth.auth().signIn(with: credential)
+                try await userRepository.createUserDocument(user: authResult.user)
+                authState = .authenticated(authResult.user)
+            } catch {
+                authState = .error(error.localizedDescription)
+            }
+        }
     }
 
     func signOut() {

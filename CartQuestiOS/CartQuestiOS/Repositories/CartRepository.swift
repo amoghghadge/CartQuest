@@ -3,7 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 
 class CartRepository {
-    private let db = Firestore.firestore()
+    private lazy var db = Firestore.firestore()
 
     private func cartsCollection() -> CollectionReference {
         guard let uid = Auth.auth().currentUser?.uid else {
