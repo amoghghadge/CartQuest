@@ -17,7 +17,7 @@ if (file("google-services.json").exists()) {
 val secretsProperties = Properties()
 val secretsFile = rootProject.file("secrets.properties")
 if (secretsFile.exists()) {
-    secretsProperties.load(secretsFile.inputStream())
+    secretsFile.inputStream().use { secretsProperties.load(it) }
 }
 
 android {
