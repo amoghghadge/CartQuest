@@ -9,8 +9,7 @@ struct AppTabView: View {
             }
 
             NavigationStack {
-                Text("Community Feed") // placeholder
-                    .navigationTitle("Community")
+                CommunityFeedView()
             }
             .tabItem {
                 Label("Community", systemImage: "person.3")
