@@ -4,8 +4,23 @@
 
 > For a deeper walkthrough of every layer, data flow, concurrency model, and cross-platform comparison, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
+## Demo
+
+### iOS (Swift / SwiftUI)
+
+<video src="ios.mp4" width="340"></video>
+
+### Android (Kotlin / Jetpack Compose)
+
+<video src="android.mp4" width="340"></video>
+
+Both demos walk through the full user journey: **authentication → cart building with Kroger product search → route optimization across nearby stores → Google Maps navigation → trip completion → community feed browsing and sharing.**
+
+---
+
 ## Table of Contents
 
+- [Demo](#demo)
 - [Motivation](#motivation)
 - [Architecture Overview](#architecture-overview)
 - [iOS App](#ios-app)
