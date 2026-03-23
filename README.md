@@ -2,9 +2,7 @@
 
 **Cross-platform grocery route optimizer** — native iOS (Swift/SwiftUI) and Android (Kotlin/Jetpack Compose) apps that find the optimal multi-store shopping route for your grocery list, minimizing total drive time while covering every item.
 
-<p align="center">
-  <img src="docs/assets/cartquest-architecture-overview.png" alt="CartQuest Architecture Overview" width="720" />
-</p>
+> For a deeper walkthrough of every layer, data flow, concurrency model, and cross-platform comparison, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ## Table of Contents
 
