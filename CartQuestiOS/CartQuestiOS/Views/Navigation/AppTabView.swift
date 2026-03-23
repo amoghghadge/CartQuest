@@ -3,10 +3,7 @@ import SwiftUI
 struct AppTabView: View {
     var body: some View {
         TabView {
-            NavigationStack {
-                Text("Cart Builder") // placeholder
-                    .navigationTitle("Shop")
-            }
+            CartBuilderView()
             .tabItem {
                 Label("Shop", systemImage: "cart")
             }
