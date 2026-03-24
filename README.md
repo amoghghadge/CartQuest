@@ -6,15 +6,15 @@
 
 ## Demo
 
+Both demos walk through the full user journey: **authentication → product search with location-aware availability → cart building → route optimization across nearby stores → Google Maps navigation → trip completion → community feed browsing and sharing.**
+
 ### iOS (Swift / SwiftUI)
 
 <video src="ios.mp4" width="340"></video>
 
 ### Android (Kotlin / Jetpack Compose)
 
-<video src="android.mp4" width="340"></video>
-
-Both demos walk through the full user journey: **authentication → product search with location-aware availability → cart building → route optimization across nearby stores → Google Maps navigation → trip completion → community feed browsing and sharing.**
+Coming soon
 
 ---
 
