@@ -10,7 +10,13 @@ Both demos walk through the full user journey: **authentication → product sear
 
 ### iOS (Swift / SwiftUI)
 
-<video src="https://github.com/user-attachments/assets/de15b458-b4a8-40b9-a9f4-0edeab235f5c" width="320"></video>
+<div align="center">
+
+| iOS Demo |
+| :---: |
+| <video src="https://github.com/user-attachments/assets/de15b458-b4a8-40b9-a9f4-0edeab235f5c" width="300" controls></video> |
+
+</div>
 
 ### Android (Kotlin / Jetpack Compose)
 
