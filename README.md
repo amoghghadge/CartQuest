@@ -10,7 +10,7 @@ Both demos walk through the full user journey: **authentication → product sear
 
 ### iOS (Swift / SwiftUI)
 
-<video src="ios.mp4" width="340"></video>
+<video src="https://raw.githubusercontent.com/amoghghadge/CartQuest/main/ios.mp4" width="340"></video>
 
 ### Android (Kotlin / Jetpack Compose)
 
