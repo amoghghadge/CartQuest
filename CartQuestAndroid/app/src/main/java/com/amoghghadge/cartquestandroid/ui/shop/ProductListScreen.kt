@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -59,11 +58,16 @@ fun ProductListScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onNavigateToCart) {
+                    IconButton(
+                        onClick = onNavigateToCart,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
                         BadgedBox(
                             badge = {
                                 if (cartCount > 0) {
-                                    Badge { Text(cartCount.toString()) }
+                                    Badge(
+                                        modifier = Modifier.padding(2.dp)
+                                    ) { Text(cartCount.toString()) }
                                 }
                             }
                         ) {
@@ -76,18 +80,6 @@ fun ProductListScreen(
                 }
             )
         },
-        bottomBar = {
-            if (state.cart.items.isNotEmpty()) {
-                Button(
-                    onClick = onNavigateToCart,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Text("Find Route (${state.cart.items.size} item${if (state.cart.items.size != 1) "s" else ""})")
-                }
-            }
-        }
     ) { innerPadding ->
         Column(
             modifier = Modifier

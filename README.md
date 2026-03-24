@@ -42,13 +42,13 @@ Both demos walk through the full user journey: **authentication → product sear
 
 Grocery shopping across multiple stores is a constrained optimization problem: each store carries different products at different prices, and driving between stores has a real time cost. CartQuest solves this by:
 
-1. Letting users search products with real-time in-store availability badges, then build a cart
-2. Querying product availability scoped to the nearest store location (Kroger API)
-3. Solving a **minimum-cost set cover** variant to find the smallest set of stores that covers every cart item
-4. Using the **Google Directions API** with waypoint optimization to minimize total drive time across feasible store subsets
+1. Letting users search products with real-time in-store availability across all nearby stores, then build a cart with optional substitute products
+2. Querying product availability in parallel across up to 50 nearby Kroger-family store locations
+3. Solving a **minimum-cost set cover** variant to find the smallest set of stores that covers every cart item (including substitutes)
+4. Using the **Google Directions API** with waypoint optimization to minimize total drive time across feasible store subsets, evaluated in parallel
 5. Rendering the optimal route on an interactive map with turn-by-turn navigation handoff
 
-The app also features a **community feed** where users can share completed shopping runs, providing social visibility into route efficiency and cost savings.
+The app also features a **community feed** where users can share completed shopping runs (with embedded static map images), providing social visibility into route efficiency and cost savings.
 
 ---
 
@@ -117,7 +117,8 @@ CartQuestiOSApp (auth state gate)
     │   └── NavigationStack
     │       ├── ShopHomeView         [centered search bar]
     │       ├── ProductListView      [grid results + availability badges]
-    │       ├── CartView             [cart items + "Find Route" checkout]
+    │       ├── CartView             [cart items + substitutes + "Find Route"]
+    │       │   └── SubstituteSearchView  [push via navigationDestination]
     │       └── RouteMapView         [push via NavigationLink]
     ├── Tab 2: Community Feed
     │   └── NavigationStack
@@ -126,7 +127,7 @@ CartQuestiOSApp (auth state gate)
         └── ProfileView             [account info + logout]
 ```
 
-The app root (`CartQuestiOSApp`) observes `LoginViewModel.authState` and conditionally renders either the login flow or the main tab interface. Each tab maintains its own `NavigationStack`, providing independent navigation history per tab — standard iOS UX behavior. The Shop tab uses a shared `ShopViewModel` that manages search, cart state, and location-aware product availability across all three screens in the navigation stack.
+The app root (`CartQuestiOSApp`) observes `LoginViewModel.authState` and conditionally renders either the login flow or the main tab interface. Each tab maintains its own `NavigationStack`, providing independent navigation history per tab — standard iOS UX behavior. The Shop tab uses a shared `ShopViewModel` that manages search, cart state, and location-aware product availability across all screens in the navigation stack. On trip completion, the `onTripCompleted` callback propagates up through `RouteMapView` → `CartView` → `AppTabView`, where it clears the cart, resets the Shop navigation stack (by rotating the `NavigationStack` identity via `UUID`), refreshes the Community feed, and switches the selected tab to Community.
 
 ### UIKit Interop
 
@@ -140,16 +141,18 @@ Three components require `UIViewRepresentable` / `UIViewControllerRepresentable`
 
 ### Share Card Generation
 
-The iOS share card uses SwiftUI's `ImageRenderer` (iOS 16+) to render a `ShareCardView` — a regular SwiftUI view — directly to a `UIImage` at the device's native display scale. This avoids Core Graphics manual drawing and keeps the share card layout declarative and maintainable:
+The iOS share card uses SwiftUI's `ImageRenderer` (iOS 16+) to render a `ShareCardView` — a regular SwiftUI view — directly to a `UIImage` at 3× scale. The share card includes an embedded **Google Static Maps** image showing store markers and a connecting path, fetched asynchronously before rendering:
 
 ```swift
 @MainActor
-static func render(run: CompletedRun) -> UIImage? {
-    let renderer = ImageRenderer(content: ShareCardView(run: run))
-    renderer.scale = UIScreen.main.scale
+static func render(run: CompletedRun, mapImage: UIImage? = nil) -> UIImage? {
+    let renderer = ImageRenderer(content: ShareCardView(run: run, mapImage: mapImage))
+    renderer.scale = 3.0
     return renderer.uiImage
 }
 ```
+
+The `loadStaticMapImage` method constructs a Google Static Maps API URL with numbered markers for each store and a polyline path connecting them, then fetches the image asynchronously. The share card layout includes the app icon, date, map image, numbered store list with item counts, and summary statistics (total cost, item count, drive time).
 
 ---
 
@@ -199,10 +202,11 @@ MainActivity (auth state gate)
 └── AppNavigation                        [authenticated]
     ├── Tab 1: Shop
     │   └── NavHost
-    │       ├── ShopHomeScreen           [centered search bar]
-    │       ├── ProductListScreen        [grid results + availability]
-    │       ├── CartScreen               [cart items + checkout]
-    │       └── RouteMapScreen/{cartId}  [navigate with arg]
+    │       ├── ShopHomeScreen                      [centered search bar]
+    │       ├── ProductListScreen                   [grid results + availability]
+    │       ├── CartScreen                          [cart items + substitutes + checkout]
+    │       │   └── SubstituteSearchScreen/{idx}    [navigate with cartItemIndex arg]
+    │       └── RouteMapScreen/{cartId}             [navigate with arg]
     ├── Tab 2: Community
     │   └── NavHost
     │       ├── CommunityFeedScreen      [start]
@@ -211,7 +215,7 @@ MainActivity (auth state gate)
         └── ProfileScreen               [account info + logout]
 ```
 
-Navigation uses **Jetpack Navigation Compose** with a sealed `Screen` class for type-safe route definitions. The Shop tab uses a shared `ShopViewModel` across its NavHost, with `LocationService` initialized via `LaunchedEffect` on first composition. Route parameters (`cartId`, `runId`) are extracted via `SavedStateHandle` in ViewModels — enabling deep linking and process death restoration.
+Navigation uses **Jetpack Navigation Compose** with a sealed `Screen` class for type-safe route definitions. The Shop tab uses a shared `ShopViewModel` across its NavHost, with `LocationService` initialized via `LaunchedEffect` on first composition. Route parameters (`cartId`, `runId`, `cartItemIndex`) are extracted via `SavedStateHandle` or `NavBackStackEntry.arguments` in ViewModels and screens. On trip completion, the `onTripCompleted` callback in `RouteMapScreen` clears the cart, pops back to `ShopHomeScreen`, and switches the selected tab to Community.
 
 ### Authentication: Credential Manager
 
@@ -243,16 +247,16 @@ This avoids hardcoding API keys in source while keeping them accessible at runti
 Unlike iOS (which leverages SwiftUI's `ImageRenderer`), the Android share card is rendered programmatically using the **Canvas API**:
 
 ```kotlin
-fun render(run: CompletedRun, context: Context): Bitmap {
+fun render(run: CompletedRun, context: Context, mapBitmap: Bitmap? = null): Bitmap {
+    val height = calculateHeight(run, mapBitmap != null)
     val bitmap = Bitmap.createBitmap(WIDTH, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    // Draw accent bar, title, date, route, items, totals, footer
-    // with Paint objects for styling (typeface, size, color, alignment)
+    // Draw app icon, title, date, map, numbered stores, stats, footer
     return bitmap
 }
 ```
 
-The renderer dynamically calculates the bitmap height based on content (number of items, overflow indicator), draws text with measured truncation for long store/product names, and outputs a shareable bitmap. Sharing uses `FileProvider` for secure URI generation and `Intent.ACTION_SEND` with the system chooser.
+The share card includes an embedded **Google Static Maps** image (fetched via `loadStaticMapImage`) showing numbered store markers and a connecting path. The renderer dynamically calculates bitmap height based on content (number of stores, presence of map image), draws the app icon alongside the title, numbered store badges with item counts, and summary statistics. Sharing uses `FileProvider` for secure URI generation and `Intent.ACTION_SEND` with the system chooser.
 
 **Why Canvas instead of Compose-to-Bitmap?** Compose snapshot testing APIs for bitmap capture are experimental and require a running composition. The Canvas approach gives precise pixel control, works from any coroutine context, and produces consistent output regardless of device configuration.
 
@@ -357,29 +361,28 @@ function optimize(cartItems, storeAvailabilities, userLocation, getDriveTime):
         if feasibleSubsets is not empty:
             break  // found minimum cardinality
 
-    // Phase 4: Minimize drive time within minimum-cardinality subsets
-    bestRoute = null
-    bestTime = ∞
-    for each subset in feasibleSubsets:
+    // Phase 4: Minimize drive time within minimum-cardinality subsets (parallelized)
+    routeCandidates = parallelMap(feasibleSubsets, subset ->
         (driveTime, polyline) = getDriveTime(userLocation, subset)
-        if driveTime < bestTime:
-            bestTime = driveTime
-            bestRoute = assignItemsToStores(cartItems, subset)
+        assignItemsToStores(cartItems, subset) with driveTime, polyline
+    ).filterSuccessful()
 
-    return bestRoute
+    return routeCandidates.minBy(driveTime)
 ```
 
 **Phase 3 — Combination generation** uses backtracking to enumerate all C(m, k) subsets of size *k*. Starting from k=1, we find the minimum number of stores needed and only evaluate drive times for subsets of that minimum size. This dramatically prunes the search space: if one store can cover everything, we never evaluate 2-store combinations.
 
-**Phase 4 — Item assignment** assigns each cart item to the first store (in visit order) that carries it, preferring the primary product over substitutes in declared priority order. This greedy assignment is optimal given a fixed store sequence because it concentrates items at earlier stops (reducing the chance of visiting a store for only one item).
+**Phase 4 — Parallel drive time evaluation.** Item assignments for all feasible subsets are pre-computed synchronously (no concurrency issues). Then, all Directions API calls are dispatched in parallel using `withTaskGroup` (iOS) / `coroutineScope { async }` (Android). Failed API calls are filtered out, and the route with the minimum total drive time is selected via `min(by:)` / `minByOrNull`. This parallelization reduces the total wall-clock time from O(feasibleSubsets) sequential API calls to approximately O(1) parallel calls.
+
+**Item assignment** assigns each cart item to the first store (in visit order) that carries it, preferring the primary product over substitutes in declared priority order. This greedy assignment is optimal given a fixed store sequence because it concentrates items at earlier stops (reducing the chance of visiting a store for only one item).
 
 ### Complexity Analysis
 
 - **Coverage matrix construction:** O(n × m × s) where *s* is max substitutes per item
 - **Subset enumeration:** O(C(m, k)) where *k* is the minimum cover size — exponential in worst case, but practical because *m* (nearby store count) is bounded by the API query limit (10) and *k* is typically 1–3
-- **Per-subset evaluation:** One Google Directions API call with waypoint optimization
+- **Per-subset evaluation:** One Google Directions API call with waypoint optimization (all subsets evaluated in parallel)
 
-For the typical case (10 stores, 2-store cover), we evaluate at most C(10, 2) = 45 subsets — well within interactive latency budgets.
+For the typical case (10 stores, 2-store cover), we evaluate at most C(10, 2) = 45 subsets. With parallel evaluation, the wall-clock time is bounded by the slowest single Directions API call rather than the sum of all 45.
 
 ### Substitute Priority System
 
@@ -421,9 +424,9 @@ tokenExpiry = currentTime + expiresIn - 60 seconds
 |----------|---------|------------|
 | `POST /v1/connect/oauth2/token` | Obtain access token | `grant_type=client_credentials`, `scope=product.compact` |
 | `GET /v1/products` | Search products by keyword | `filter.term`, `filter.locationId`, `filter.limit` |
-| `GET /v1/locations` | Find stores by coordinates | `filter.lat.near`, `filter.lon.near`, `filter.radiusInMiles`, `filter.limit` |
+| `GET /v1/locations` | Find stores by coordinates (up to 50) | `filter.lat.near`, `filter.lon.near`, `filter.radiusInMiles`, `filter.limit` |
 
-Product search is scoped to a specific store location ID to determine per-store availability. The optimizer queries each nearby store for each product in the cart, building the coverage matrix for route computation.
+Product search fans out across all nearby store location IDs in parallel (up to 50 stores), deduplicating results by product ID. Only products with confirmed in-store availability are shown. The optimizer separately queries each nearby store for each product in the cart (also parallelized), building the coverage matrix for route computation.
 
 ### Google Directions API
 
@@ -453,7 +456,7 @@ The response provides:
 
 Both platforms decode the overview polyline from the Directions API into coordinate arrays for rendering. The iOS app includes a custom polyline decoder implementing the [Google Encoded Polyline Algorithm](https://developers.google.com/maps/documentation/utilities/polylinealgorithm), while Android uses the Maps SDK utility.
 
-**Navigation handoff:** Both platforms construct deep-link URIs to the Google Maps app for turn-by-turn navigation. The iOS app uses the `comgooglemaps://` URL scheme with a web fallback; Android uses an `ACTION_VIEW` intent targeting `com.google.android.apps.maps` with a browser fallback.
+**Navigation handoff:** Both platforms construct deep-link URIs to the Google Maps app with all stops in route order (not just the last stop as a destination). The iOS app uses the `comgooglemaps://` URL scheme with `saddr` (user location) and `daddr` (all stops chained with `+to:`), falling back to `https://www.google.com/maps/dir/{origin}/{stop1}/{stop2}/...`. Android uses an `ACTION_VIEW` intent with the `/maps/dir/` path format for multi-stop routes, or `google.navigation:q=` for single-stop routes, targeting `com.google.android.apps.maps` with a browser fallback.
 
 ---
 
@@ -475,6 +478,8 @@ CartItem
     ├── name: String
     └── brand: String
 ```
+
+Substitutes are managed through a dedicated `SubstituteSearchView`/`SubstituteSearchScreen` that reuses the same multi-store parallel search pipeline. Users add substitutes from the cart view — each substitute is searched across all nearby stores and added to the cart item's `substitutes` array. During route optimization, the coverage matrix considers all product IDs (primary + substitutes), and item assignment prefers the primary product, falling back through substitutes in declared priority order.
 
 | iOS | Android |
 |-----|---------|
@@ -570,7 +575,7 @@ Aggressive API call reduction through layered debouncing:
 
 | Operation | iOS Delay | Android Delay | Rationale |
 |-----------|-----------|---------------|-----------|
-| Product search | 400ms | 500ms | Avoid API calls on every keystroke; 400–500ms covers typical inter-keystroke intervals |
+| Product search | Immediate on submit | Immediate on submit | Search is triggered on submit, not on keystroke; parallelized across all nearby store locations |
 | Cart save to Firestore | 800ms | 1000ms | Batch rapid mutations (quantity changes, add/remove) into a single write |
 | Community feed search | 300ms | 300ms (via `Flow.debounce`) | Client-side filtering is fast; shorter delay for responsiveness |
 
@@ -613,9 +618,21 @@ Both platforms use lazy containers for scrollable content:
 
 This ensures only visible items are composed/rendered, keeping memory usage flat regardless of list size.
 
+### Parallelized Network Operations
+
+The app aggressively parallelizes independent API calls using structured concurrency:
+
+| Operation | iOS | Android | Parallelism |
+|-----------|-----|---------|-------------|
+| Product search | `withTaskGroup` | `async/awaitAll` | Fans out across all nearby store location IDs simultaneously |
+| Availability matrix | Nested `withTaskGroup` (stores × products) | Nested `async/awaitAll` | Each store's products queried in parallel; all stores queried in parallel |
+| Drive time evaluation | `withTaskGroup` over feasible subsets | `coroutineScope { async }` over feasible subsets | All C(m, k) subset Directions API calls made concurrently |
+
+This parallelization is critical for route optimization latency: with 10 stores and 5 products, the sequential approach would make 50 API calls in series. The parallel approach completes all 50 in roughly the time of one call (bounded by API rate limits and network latency).
+
 ### Token Caching
 
-The Kroger OAuth token is cached in memory with preemptive refresh (60 seconds before expiry). During route optimization, which makes many sequential API calls (one per product per store), this avoids redundant token requests. Thread safety is ensured via `NSLock` (iOS) / `Mutex` (Android) to handle concurrent access from parallel network operations.
+The Kroger OAuth token is cached in memory with preemptive refresh (60 seconds before expiry). During route optimization, which makes many concurrent API calls (one per product per store), this avoids redundant token requests. Thread safety is ensured via `NSLock` (iOS) / `Mutex` (Android) to handle concurrent access from parallel network operations.
 
 ---
 
@@ -694,9 +711,10 @@ CartQuest/
 │           ├── Shop/
 │           │   ├── ShopHomeView.swift           # Google-style centered search landing
 │           │   ├── ProductListView.swift        # Grid results with availability badges
-│           │   ├── ProductCard.swift            # Product card with add-to-cart stepper
-│           │   ├── CartView.swift               # Cart items + "Find Route" checkout
-│           │   └── ShopViewModel.swift          # Shared VM: search, cart, location
+│           │   ├── ProductCard.swift            # Product card with add-to-cart action
+│           │   ├── CartView.swift               # Cart items + substitutes + "Find Route"
+│           │   ├── SubstituteSearchView.swift   # Substitute product search + add
+│           │   └── ShopViewModel.swift          # Shared VM: search, cart, location, subs
 │           ├── Profile/
 │           │   └── ProfileView.swift            # Account info + logout
 │           ├── Route/
@@ -743,13 +761,14 @@ CartQuest/
             │   └── LoginViewModel.kt            # Auth state machine
             ├── navigation/
             │   ├── AppNavigation.kt             # Bottom nav + per-tab NavHosts
-            │   └── Screen.kt                    # Sealed route definitions
+            │   └── Screen.kt                    # Sealed route definitions (6 routes)
             ├── shop/
             │   ├── ShopHomeScreen.kt            # Centered search bar landing page
             │   ├── ProductListScreen.kt         # Grid results with availability badges
             │   ├── ProductCard.kt               # Product card composable
-            │   ├── CartScreen.kt                # Cart items + checkout button
-            │   └── ShopViewModel.kt             # Shared VM: search, cart, location
+            │   ├── CartScreen.kt                # Cart items + substitutes + checkout
+            │   ├── SubstituteSearchScreen.kt    # Substitute product search + add
+            │   └── ShopViewModel.kt             # Shared VM: search, cart, location, subs
             ├── profile/
             │   ├── ProfileScreen.kt             # Account info + logout
             │   └── ProfileViewModel.kt          # Profile state + signOut

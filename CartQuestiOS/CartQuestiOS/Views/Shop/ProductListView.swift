@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ProductListView: View {
     @Bindable var viewModel: ShopViewModel
+    var onTripCompleted: (() -> Void)?
+    @FocusState private var isSearchFocused: Bool
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -9,13 +11,40 @@ struct ProductListView: View {
     ]
 
     var body: some View {
-        Group {
-            if viewModel.isSearching {
-                VStack {
-                    Spacer()
-                    ProgressView("Searching...")
-                    Spacer()
+        VStack(spacing: 0) {
+            // Inline search bar
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search products", text: $viewModel.searchQuery)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    .onSubmit {
+                        viewModel.search()
+                        isSearchFocused = false
+                    }
+                if !viewModel.searchQuery.isEmpty {
+                    Button {
+                        viewModel.searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
                 }
+            }
+            .padding(10)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            // Content
+            if viewModel.isSearching {
+                Spacer()
+                ProgressView("Searching...")
+                Spacer()
             } else if viewModel.searchResults.isEmpty && viewModel.hasSearched {
                 ContentUnavailableView.search(text: viewModel.searchQuery)
             } else {
@@ -32,8 +61,8 @@ struct ProductListView: View {
                         }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.top, 12)
-                    .padding(.bottom, 80)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
                 }
             }
         }
@@ -43,44 +72,24 @@ struct ProductListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 let itemCount = viewModel.cart.items.reduce(0) { $0 + $1.quantity }
                 NavigationLink {
-                    CartView(viewModel: viewModel)
+                    CartView(viewModel: viewModel, onTripCompleted: onTripCompleted)
                 } label: {
-                    if itemCount > 0 {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "cart.fill")
-                                .font(.body)
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: itemCount > 0 ? "cart.fill" : "cart")
+                            .font(.body)
+                            .frame(width: 24, height: 24)
+                            .padding(.top, 6)
+                            .padding(.trailing, 6)
 
+                        if itemCount > 0 {
                             Text("\(itemCount)")
-                                .font(.caption2)
-                                .fontWeight(.bold)
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
-                                .padding(3)
-                                .background(Color.red)
+                                .frame(minWidth: 18, minHeight: 18)
+                                .background(Color(red: 0.9, green: 0.1, blue: 0.1))
                                 .clipShape(Circle())
-                                .offset(x: 8, y: -8)
                         }
-                    } else {
-                        Image(systemName: "cart")
                     }
-                }
-            }
-        }
-        .searchable(text: $viewModel.searchQuery, prompt: "Search products")
-        .onSubmit(of: .search) {
-            viewModel.search()
-        }
-        .overlay(alignment: .bottom) {
-            let itemCount = viewModel.cart.items.reduce(0) { $0 + $1.quantity }
-            if itemCount > 0 {
-                NavigationLink {
-                    CartView(viewModel: viewModel)
-                } label: {
-                    Text("Find Route (\(itemCount) item\(itemCount == 1 ? "" : "s"))")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(Color.accentColor)
                 }
             }
         }

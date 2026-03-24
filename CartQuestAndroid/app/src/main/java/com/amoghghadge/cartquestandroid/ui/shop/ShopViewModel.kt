@@ -12,6 +12,8 @@ import com.amoghghadge.cartquestandroid.data.remote.KrogerAuthManager
 import com.amoghghadge.cartquestandroid.data.repository.CartRepository
 import com.amoghghadge.cartquestandroid.service.LocationService
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,8 +25,8 @@ data class ProductResult(
     val product: KrogerProduct,
     val isAvailable: Boolean
 ) {
-    val price: Double? get() = product.items.firstOrNull()?.price?.regular
-    val imageUrl: String? get() = product.images.firstOrNull()?.sizes?.lastOrNull()?.url
+    val price: Double? get() = product.items?.firstOrNull()?.price?.regular
+    val imageUrl: String? get() = product.bestImageUrl
 }
 
 data class ShopUiState(
@@ -34,7 +36,7 @@ data class ShopUiState(
     val hasSearched: Boolean = false,
     val cart: Cart = Cart(),
     val isSaving: Boolean = false,
-    val nearbyLocationId: String? = null,
+    val nearbyLocationIds: List<String> = emptyList(),
     val locationError: String? = null
 )
 
@@ -80,8 +82,8 @@ class ShopViewModel : ViewModel() {
                     lat = latLng.latitude,
                     lon = latLng.longitude
                 )
-                val nearestLocationId = response.data.firstOrNull()?.locationId
-                _uiState.update { it.copy(nearbyLocationId = nearestLocationId) }
+                val locationIds = response.data.map { it.locationId }
+                _uiState.update { it.copy(nearbyLocationIds = locationIds) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(locationError = e.message) }
             }
@@ -104,22 +106,70 @@ class ShopViewModel : ViewModel() {
             _uiState.update { it.copy(isSearching = true) }
             try {
                 val token = krogerAuthManager.getToken()
-                val response = krogerApiService.searchProducts(
-                    auth = "Bearer $token",
-                    term = query,
-                    locationId = _uiState.value.nearbyLocationId
-                )
-                val results = response.data.map { product ->
-                    ProductResult(
-                        product = product,
-                        isAvailable = product.items.firstOrNull()?.fulfillment?.inStore == true
+                val locationIds = _uiState.value.nearbyLocationIds
+
+                val allProducts = if (locationIds.isEmpty()) {
+                    // Fallback: search without location filter
+                    val response = krogerApiService.searchProducts(
+                        auth = "Bearer $token",
+                        term = query
                     )
+                    response.data
+                } else {
+                    // Search all nearby stores in parallel
+                    locationIds.map { locationId ->
+                        async {
+                            try {
+                                krogerApiService.searchProducts(
+                                    auth = "Bearer $token",
+                                    term = query,
+                                    locationId = locationId
+                                ).data
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                        }
+                    }.awaitAll().flatten()
+                }
+
+                // Deduplicate by product ID, keep first occurrence
+                val seen = mutableSetOf<String>()
+                val results = allProducts.mapNotNull { product ->
+                    val inStore = product.items?.firstOrNull()?.fulfillment?.inStore == true
+                    if (inStore && seen.add(product.productId)) {
+                        ProductResult(product = product, isAvailable = true)
+                    } else null
                 }
                 _uiState.update { it.copy(searchResults = results, isSearching = false, hasSearched = true) }
             } catch (_: Exception) {
                 _uiState.update { it.copy(isSearching = false, hasSearched = true) }
             }
         }
+    }
+
+    suspend fun searchProducts(query: String): List<ProductResult> {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return emptyList()
+        return try {
+            val token = krogerAuthManager.getToken()
+            val locationIds = _uiState.value.nearbyLocationIds
+            val allProducts = if (locationIds.isEmpty()) {
+                krogerApiService.searchProducts(auth = "Bearer $token", term = trimmed).data
+            } else {
+                locationIds.map { locationId ->
+                    viewModelScope.async {
+                        try {
+                            krogerApiService.searchProducts(auth = "Bearer $token", term = trimmed, locationId = locationId).data
+                        } catch (_: Exception) { emptyList() }
+                    }
+                }.awaitAll().flatten()
+            }
+            val seen = mutableSetOf<String>()
+            allProducts.mapNotNull { product ->
+                val inStore = product.items?.firstOrNull()?.fulfillment?.inStore == true
+                if (inStore && seen.add(product.productId)) ProductResult(product, true) else null
+            }
+        } catch (_: Exception) { emptyList() }
     }
 
     fun clearSearch() {
@@ -134,11 +184,11 @@ class ShopViewModel : ViewModel() {
     }
 
     fun addToCart(product: KrogerProduct) {
-        val imageUrl = product.images.firstOrNull()?.sizes?.lastOrNull()?.url.orEmpty()
+        val imageUrl = product.bestImageUrl.orEmpty()
         val newItem = CartItem(
             productId = product.productId,
             name = product.description,
-            brand = product.brand,
+            brand = product.brand.orEmpty(),
             imageUrl = imageUrl,
             quantity = 1
         )
@@ -178,6 +228,46 @@ class ShopViewModel : ViewModel() {
             state.copy(cart = state.cart.copy(items = items))
         }
         debounceSave()
+    }
+
+    fun addSubstitute(cartItemIndex: Int, product: KrogerProduct) {
+        _uiState.update { state ->
+            val items = state.cart.items.toMutableList()
+            if (cartItemIndex in items.indices) {
+                val item = items[cartItemIndex]
+                val sub = com.amoghghadge.cartquestandroid.data.model.Substitute(
+                    productId = product.productId,
+                    name = product.description,
+                    brand = product.brand.orEmpty()
+                )
+                if (item.substitutes.none { it.productId == sub.productId }) {
+                    items[cartItemIndex] = item.copy(substitutes = item.substitutes + sub)
+                }
+            }
+            state.copy(cart = state.cart.copy(items = items))
+        }
+        debounceSave()
+    }
+
+    fun removeSubstitute(cartItemIndex: Int, substituteIndex: Int) {
+        _uiState.update { state ->
+            val items = state.cart.items.toMutableList()
+            if (cartItemIndex in items.indices) {
+                val item = items[cartItemIndex]
+                val subs = item.substitutes.toMutableList()
+                if (substituteIndex in subs.indices) {
+                    subs.removeAt(substituteIndex)
+                    items[cartItemIndex] = item.copy(substitutes = subs)
+                }
+            }
+            state.copy(cart = state.cart.copy(items = items))
+        }
+        debounceSave()
+    }
+
+    fun clearCart() {
+        saveJob?.cancel()
+        _uiState.update { it.copy(cart = Cart(), searchQuery = "", searchResults = emptyList(), hasSearched = false) }
     }
 
     fun updateQuantity(index: Int, quantity: Int) {

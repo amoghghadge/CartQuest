@@ -23,7 +23,8 @@ class KrogerService {
         var components = URLComponents(string: "\(baseURL)/v1/products")!
         var queryItems = [
             URLQueryItem(name: "filter.term", value: term),
-            URLQueryItem(name: "filter.limit", value: "\(limit)")
+            URLQueryItem(name: "filter.limit", value: "\(limit)"),
+            URLQueryItem(name: "filter.fulfillment", value: "ais")
         ]
         if let locationId = locationId {
             queryItems.append(URLQueryItem(name: "filter.locationId", value: locationId))

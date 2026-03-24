@@ -2,10 +2,14 @@ import SwiftUI
 import GoogleMaps
 import CoreLocation
 
+struct ShareableImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
 struct RunDetailView: View {
     @State private var viewModel: RunDetailViewModel
-    @State private var shareImage: UIImage?
-    @State private var showShareSheet = false
+    @State private var shareItem: ShareableImage?
 
     init(runId: String) {
         _viewModel = State(initialValue: RunDetailViewModel(runId: runId))
@@ -30,20 +34,20 @@ struct RunDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    if let run = viewModel.run,
-                       let image = ShareCardRenderer.render(run: run) {
-                        shareImage = image
-                        showShareSheet = true
+                    Task {
+                        guard let run = viewModel.run else { return }
+                        let mapImage = await ShareCardRenderer.loadStaticMapImage(stores: run.stores)
+                        if let image = ShareCardRenderer.render(run: run, mapImage: mapImage) {
+                            shareItem = ShareableImage(image: image)
+                        }
                     }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
             }
         }
-        .sheet(isPresented: $showShareSheet) {
-            if let shareImage {
-                ActivityViewController(activityItems: [shareImage])
-            }
+        .sheet(item: $shareItem) { item in
+            ActivityViewController(activityItems: [item.image])
         }
         .task {
             await viewModel.loadRun()

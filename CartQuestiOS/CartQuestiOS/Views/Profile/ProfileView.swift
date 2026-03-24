@@ -43,7 +43,12 @@ struct ProfileView: View {
                     }
 
                     Section {
-                        LabeledContent("User ID", value: String(user?.uid.prefix(8) ?? "") + "...")
+                        LabeledContent("User ID") {
+                            Text(user?.uid ?? "")
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                         LabeledContent("Email Verified", value: user?.isEmailVerified == true ? "Yes" : "No")
                     }
                 }

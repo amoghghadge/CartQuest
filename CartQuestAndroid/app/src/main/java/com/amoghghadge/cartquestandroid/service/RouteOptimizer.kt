@@ -2,6 +2,9 @@ package com.amoghghadge.cartquestandroid.service
 
 import com.amoghghadge.cartquestandroid.data.model.*
 import com.google.android.gms.maps.model.LatLng
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 class RouteOptimizer {
 
@@ -66,26 +69,24 @@ class RouteOptimizer {
             throw IllegalStateException("Cannot cover all items with available stores")
         }
 
-        // Step 4: For each feasible subset, get drive time
-        var bestRoute: OptimizedRoute? = null
-        var bestTime = Int.MAX_VALUE
-
-        for (subset in feasibleSubsets) {
-            val stores = subset.map { storeAvailabilities[it].store }
-            try {
-                val (driveTime, polyline) = getDriveTime(userLocation, stores)
-                if (driveTime < bestTime) {
-                    bestTime = driveTime
-                    // Step 6: Assign items to stores
-                    val stops = assignItemsToStores(cartItems, subset.toList(), storeAvailabilities)
-                    bestRoute = OptimizedRoute(stops, driveTime, polyline)
+        // Step 4: For each feasible subset, get drive time (parallelized)
+        val routeCandidates = coroutineScope {
+            feasibleSubsets.map { subset ->
+                async {
+                    val stores = subset.map { storeAvailabilities[it].store }
+                    try {
+                        val (driveTime, polyline) = getDriveTime(userLocation, stores)
+                        val stops = assignItemsToStores(cartItems, subset.toList(), storeAvailabilities)
+                        OptimizedRoute(stops, driveTime, polyline)
+                    } catch (_: Exception) {
+                        null
+                    }
                 }
-            } catch (e: Exception) {
-                continue // skip this subset if directions fails
-            }
+            }.awaitAll().filterNotNull()
         }
 
-        return bestRoute ?: throw IllegalStateException("Could not compute route for any store combination")
+        return routeCandidates.minByOrNull { it.totalDriveTimeSeconds }
+            ?: throw IllegalStateException("Could not compute route for any store combination")
     }
 
     private fun buildCoverageMatrix(
@@ -144,12 +145,12 @@ class RouteOptimizer {
                 val matchedPid = productIds.firstOrNull { available.containsKey(it) }
                 if (matchedPid != null) {
                     val product = available[matchedPid]!!
-                    val price = product.items.firstOrNull()?.price?.regular ?: 0.0
+                    val price = product.items?.firstOrNull()?.price?.regular ?: 0.0
                     storeItems[storeIdx]!!.add(
                         AssignedItem(
                             productId = matchedPid,
                             name = product.description,
-                            brand = product.brand,
+                            brand = product.brand.orEmpty(),
                             price = price
                         )
                     )

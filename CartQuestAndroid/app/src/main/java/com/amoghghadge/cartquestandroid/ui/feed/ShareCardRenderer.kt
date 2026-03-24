@@ -2,11 +2,16 @@ package com.amoghghadge.cartquestandroid.ui.feed
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
+import com.amoghghadge.cartquestandroid.BuildConfig
+import com.amoghghadge.cartquestandroid.R
 import com.amoghghadge.cartquestandroid.data.model.CompletedRun
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -14,228 +19,201 @@ import java.util.Locale
 class ShareCardRenderer {
     companion object {
         private const val WIDTH = 1080
-        private const val HORIZONTAL_PADDING = 64f
-        private const val MAX_ITEMS_SHOWN = 6
+        private const val PADDING = 64f
+        private const val CONTENT_WIDTH = WIDTH - 2 * PADDING
 
         private val brandColor = Color.parseColor("#4285F4")
+        private val textPrimary = Color.parseColor("#1A1A1A")
+        private val textSecondary = Color.parseColor("#888888")
+        private val dividerColor = Color.parseColor("#EEEEEE")
 
-        fun render(run: CompletedRun, context: Context): Bitmap {
-            val height = calculateHeight(run)
+        fun render(run: CompletedRun, context: Context, mapBitmap: Bitmap? = null): Bitmap {
+            val height = calculateHeight(run, mapBitmap != null)
             val bitmap = Bitmap.createBitmap(WIDTH, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
 
-            // White background
             canvas.drawColor(Color.WHITE)
 
-            var y = 0f
+            var y = PADDING
 
-            // -- Header accent bar --
-            val accentPaint = Paint().apply { color = brandColor }
-            canvas.drawRect(0f, 0f, WIDTH.toFloat(), 8f, accentPaint)
-            y += 8f
+            // -- App icon + title --
+            val appIcon = BitmapFactory.decodeResource(context.resources, R.drawable.app_icon)
+            if (appIcon != null) {
+                val iconSize = 120f
+                val scaledIcon = Bitmap.createScaledBitmap(appIcon, iconSize.toInt(), iconSize.toInt(), true)
+                val iconRect = RectF(PADDING, y, PADDING + iconSize, y + iconSize)
+                val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+                canvas.drawBitmap(scaledIcon, null, iconRect, iconPaint)
 
-            // -- App title --
-            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = brandColor
-                textSize = 56f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = brandColor
+                    textSize = 56f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+                canvas.drawText("CartQuest", PADDING + iconSize + 32f, y + iconSize / 2f + 18f, titlePaint)
             }
-            y += 80f
-            canvas.drawText("CartQuest", HORIZONTAL_PADDING, y, titlePaint)
+            y += 120f + 48f
 
             // -- Date --
             val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#666666")
+                color = textSecondary
                 textSize = 36f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             }
             val dateFormat = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault())
-            y += 52f
-            canvas.drawText(dateFormat.format(Date(run.completedAt)), HORIZONTAL_PADDING, y, datePaint)
+            canvas.drawText(dateFormat.format(Date(run.completedAt)), PADDING, y, datePaint)
+            y += 56f
 
-            // -- Divider --
-            y += 32f
-            val dividerPaint = Paint().apply { color = Color.parseColor("#E0E0E0"); strokeWidth = 2f }
-            canvas.drawLine(HORIZONTAL_PADDING, y, WIDTH - HORIZONTAL_PADDING, y, dividerPaint)
-
-            // -- Route summary --
-            val sectionLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#999999")
-                textSize = 30f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                letterSpacing = 0.08f
+            // -- Map image --
+            if (mapBitmap != null) {
+                val mapHeight = (CONTENT_WIDTH / mapBitmap.width.toFloat() * mapBitmap.height).toInt()
+                val scaledMap = Bitmap.createScaledBitmap(mapBitmap, CONTENT_WIDTH.toInt(), mapHeight, true)
+                val mapRect = RectF(PADDING, y, PADDING + CONTENT_WIDTH, y + mapHeight)
+                canvas.drawBitmap(scaledMap, null, mapRect, Paint(Paint.ANTI_ALIAS_FLAG))
+                y += mapHeight + 40f
             }
-            y += 52f
-            canvas.drawText("ROUTE", HORIZONTAL_PADDING, y, sectionLabelPaint)
 
-            val routePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#333333")
+            // -- Stores visited --
+            val sectionLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = textSecondary
+                textSize = 28f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                letterSpacing = 0.1f
+            }
+            canvas.drawText("STORES VISITED", PADDING, y, sectionLabelPaint)
+            y += 44f
+
+            val storeNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = textPrimary
                 textSize = 38f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             }
-            val routeText = run.stores.joinToString("  →  ") { it.storeName }
-            y += 50f
-            // Truncate route text if too long
-            val maxRouteWidth = WIDTH - 2 * HORIZONTAL_PADDING
-            val truncatedRoute = truncateText(routeText, routePaint, maxRouteWidth)
-            canvas.drawText(truncatedRoute, HORIZONTAL_PADDING, y, routePaint)
 
-            // -- Divider --
-            y += 32f
-            canvas.drawLine(HORIZONTAL_PADDING, y, WIDTH - HORIZONTAL_PADDING, y, dividerPaint)
-
-            // -- Item highlights --
-            y += 52f
-            canvas.drawText("ITEMS", HORIZONTAL_PADDING, y, sectionLabelPaint)
-
-            val itemNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#333333")
-                textSize = 36f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-            }
-            val itemPricePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#333333")
-                textSize = 36f
+            val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = brandColor }
+            val circleTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 24f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
+            }
+
+            val itemCountPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#AAAAAA")
+                textSize = 32f
                 textAlign = Paint.Align.RIGHT
             }
 
-            val allItems = run.stores.flatMap { store ->
-                store.items.map { item -> item to store.storeName }
-            }
-            val displayItems = allItems.take(MAX_ITEMS_SHOWN)
-
-            for ((item, _) in displayItems) {
-                y += 50f
-                val nameMaxWidth = WIDTH - 2 * HORIZONTAL_PADDING - 180f
-                val truncatedName = truncateText(item.name, itemNamePaint, nameMaxWidth)
-                canvas.drawText(truncatedName, HORIZONTAL_PADDING, y, itemNamePaint)
+            for ((index, store) in run.stores.withIndex()) {
+                val circleRadius = 28f
+                val circleCenterX = PADDING + circleRadius
+                val circleCenterY = y + circleRadius - 6f
+                canvas.drawCircle(circleCenterX, circleCenterY, circleRadius, circlePaint)
                 canvas.drawText(
-                    "$${String.format("%.2f", item.price)}",
-                    WIDTH - HORIZONTAL_PADDING,
-                    y,
-                    itemPricePaint
+                    "${index + 1}",
+                    circleCenterX,
+                    circleCenterY + 9f,
+                    circleTextPaint
                 )
-            }
-
-            if (allItems.size > MAX_ITEMS_SHOWN) {
-                y += 50f
-                val morePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#999999")
-                    textSize = 32f
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
-                }
                 canvas.drawText(
-                    "+${allItems.size - MAX_ITEMS_SHOWN} more item${if (allItems.size - MAX_ITEMS_SHOWN != 1) "s" else ""}",
-                    HORIZONTAL_PADDING,
-                    y,
-                    morePaint
+                    store.storeName,
+                    PADDING + circleRadius * 2 + 24f,
+                    y + circleRadius + 4f,
+                    storeNamePaint
                 )
+                val count = store.items.size
+                canvas.drawText(
+                    "$count item${if (count == 1) "" else "s"}",
+                    WIDTH - PADDING,
+                    y + circleRadius + 4f,
+                    itemCountPaint
+                )
+                y += 64f
             }
+            y += 16f
 
             // -- Divider --
+            val dividerPaint = Paint().apply { color = dividerColor; strokeWidth = 2f }
+            canvas.drawLine(PADDING, y, WIDTH - PADDING, y, dividerPaint)
             y += 40f
-            canvas.drawLine(HORIZONTAL_PADDING, y, WIDTH - HORIZONTAL_PADDING, y, dividerPaint)
 
-            // -- Total cost and drive time --
-            val summaryLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#333333")
-                textSize = 40f
+            // -- Stats row: Total cost + Drive time --
+            val statsLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = textSecondary
+                textSize = 28f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                letterSpacing = 0.05f
             }
-            val summaryValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val costValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = brandColor
-                textSize = 44f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                textAlign = Paint.Align.RIGHT
-            }
-
-            y += 56f
-            canvas.drawText("Total Cost", HORIZONTAL_PADDING, y, summaryLabelPaint)
-            canvas.drawText(
-                "$${String.format("%.2f", run.totalCost)}",
-                WIDTH - HORIZONTAL_PADDING,
-                y,
-                summaryValuePaint
-            )
-
-            val driveTimeLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#333333")
-                textSize = 36f
+                textSize = 48f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val driveValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#333333")
-                textSize = 40f
+                color = textPrimary
+                textSize = 48f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 textAlign = Paint.Align.RIGHT
             }
-            y += 52f
-            canvas.drawText("Drive Time", HORIZONTAL_PADDING, y, driveTimeLabelPaint)
-            canvas.drawText(
-                "${run.totalDriveTimeMinutes} min",
-                WIDTH - HORIZONTAL_PADDING,
-                y,
-                driveValuePaint
-            )
-
-            // -- Footer branding --
-            y += 56f
-            canvas.drawLine(HORIZONTAL_PADDING, y, WIDTH - HORIZONTAL_PADDING, y, dividerPaint)
-
-            val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#AAAAAA")
+            val driveLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = textSecondary
                 textSize = 28f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-                textAlign = Paint.Align.CENTER
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                letterSpacing = 0.05f
+                textAlign = Paint.Align.RIGHT
             }
-            y += 48f
-            canvas.drawText(
-                "Shared from CartQuest — Smart Grocery Shopping",
-                WIDTH / 2f,
-                y,
-                footerPaint
-            )
+
+            val totalItems = run.stores.sumOf { it.items.size }
+
+            val rightColX = WIDTH - PADDING - 250f
+
+            canvas.drawText("TOTAL COST", PADDING, y, statsLabelPaint)
+            canvas.drawText("ITEMS", rightColX, y, driveLabelPaint)
+            canvas.drawText("DRIVE TIME", WIDTH - PADDING, y, driveLabelPaint)
+            y += 56f
+            canvas.drawText("$${String.format("%.2f", run.totalCost)}", PADDING, y, costValuePaint)
+            canvas.drawText("$totalItems", rightColX, y, driveValuePaint)
+            canvas.drawText("${run.totalDriveTimeMinutes} min", WIDTH - PADDING, y, driveValuePaint)
 
             return bitmap
         }
 
-        private fun calculateHeight(run: CompletedRun): Int {
-            var height = 0
-            height += 8    // accent bar
-            height += 80   // app title
-            height += 52   // date
-            height += 32   // divider gap
-            height += 52   // route label
-            height += 50   // route text
-            height += 32   // divider gap
-            height += 52   // items label
+        fun loadStaticMapBitmap(stores: List<com.amoghghadge.cartquestandroid.data.model.StoreStop>): Bitmap? {
+            if (stores.isEmpty()) return null
+            val apiKey = BuildConfig.GOOGLE_MAPS_API_KEY
+            if (apiKey.isBlank()) return null
 
-            val allItems = run.stores.flatMap { it.items }
-            val displayCount = minOf(allItems.size, MAX_ITEMS_SHOWN)
-            height += displayCount * 50
+            val sb = StringBuilder("https://maps.googleapis.com/maps/api/staticmap?size=800x400&maptype=roadmap&scale=2")
 
-            if (allItems.size > MAX_ITEMS_SHOWN) {
-                height += 50 // "+N more items"
+            for ((index, store) in stores.withIndex()) {
+                sb.append("&markers=color:0x4285F4|label:${index + 1}|${store.lat},${store.lng}")
             }
 
-            height += 40   // divider gap
-            height += 56   // total cost
-            height += 52   // drive time
-            height += 56   // divider gap
-            height += 48   // footer text
-            height += 48   // bottom padding
+            if (stores.size > 1) {
+                val pathCoords = stores.joinToString("|") { "${it.lat},${it.lng}" }
+                sb.append("&path=color:0x4285F4ff|weight:3|$pathCoords")
+            }
 
-            return height
+            sb.append("&key=$apiKey")
+
+            return try {
+                val stream = URL(sb.toString()).openStream()
+                BitmapFactory.decodeStream(stream)
+            } catch (_: Exception) {
+                null
+            }
         }
 
-        private fun truncateText(text: String, paint: Paint, maxWidth: Float): String {
-            if (paint.measureText(text) <= maxWidth) return text
-            var truncated = text
-            while (truncated.isNotEmpty() && paint.measureText("$truncated...") > maxWidth) {
-                truncated = truncated.dropLast(1)
-            }
-            return "$truncated..."
+        private fun calculateHeight(run: CompletedRun, hasMap: Boolean): Int {
+            var h = PADDING.toInt()       // top padding
+            h += 120 + 48                 // icon + title + gap
+            h += 56                       // date
+            if (hasMap) h += 500 + 40     // map image estimate + gap
+            h += 44                       // section label
+            h += run.stores.size * 64     // store rows
+            h += 16                       // gap
+            h += 2 + 40                   // divider + gap
+            h += 28 + 56                  // stats labels + values
+            h += PADDING.toInt()          // bottom padding
+            return h
         }
     }
 }

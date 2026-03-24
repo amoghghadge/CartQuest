@@ -55,9 +55,9 @@ fun ProductCard(
                 maxLines = 2
             )
 
-            if (result.product.brand.isNotBlank()) {
+            if (!result.product.brand.isNullOrBlank()) {
                 Text(
-                    text = result.product.brand,
+                    text = result.product.brand!!,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -75,15 +75,6 @@ fun ProductCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             when {
-                !result.isAvailable -> {
-                    Button(
-                        onClick = {},
-                        enabled = false,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Unavailable near you")
-                    }
-                }
                 cartQuantity > 0 -> {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

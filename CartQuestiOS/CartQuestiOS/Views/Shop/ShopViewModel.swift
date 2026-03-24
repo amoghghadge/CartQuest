@@ -14,11 +14,11 @@ class ShopViewModel {
         var id: String { product.productId }
 
         var price: Double? {
-            product.items.first?.price?.regular
+            product.items?.first?.price?.regular
         }
 
         var imageUrl: String? {
-            product.images.first?.sizes.last?.url
+            product.bestImageUrl
         }
     }
 
@@ -32,7 +32,7 @@ class ShopViewModel {
     var cart: Cart = Cart()
     var isSaving: Bool = false
 
-    var nearbyLocationId: String? = nil
+    var nearbyLocationIds: [String] = []
     var locationError: String? = nil
 
     // MARK: - Private
@@ -76,9 +76,9 @@ class ShopViewModel {
                 lat: coordinate.latitude,
                 lon: coordinate.longitude,
                 radiusInMiles: 10,
-                limit: 1
+                limit: 50
             )
-            nearbyLocationId = stores.first?.locationId
+            nearbyLocationIds = stores.map { $0.locationId }
         } catch {
             locationError = error.localizedDescription
         }
@@ -111,21 +111,89 @@ class ShopViewModel {
             isSearching = false
             hasSearched = true
         }
-        do {
-            let products = try await krogerService.searchProducts(
-                term: query,
-                locationId: nearbyLocationId,
-                limit: 50
-            )
-            guard !Task.isCancelled else { return }
-            searchResults = products.map { product in
-                let inStore = product.items.first?.fulfillment?.inStore ?? false
-                return ProductResult(product: product, isAvailable: inStore)
+
+        let locationIds = nearbyLocationIds
+        guard !locationIds.isEmpty else {
+            // No stores found — search without location filter as fallback
+            do {
+                let products = try await krogerService.searchProducts(term: query, limit: 50)
+                guard !Task.isCancelled else { return }
+                searchResults = products.compactMap { product in
+                    let inStore = product.items?.first?.fulfillment?.inStore ?? false
+                    guard inStore else { return nil }
+                    return ProductResult(product: product, isAvailable: true)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("Search failed: \(error)")
+                searchResults = []
             }
-        } catch {
-            guard !Task.isCancelled else { return }
-            print("Search failed: \(error)")
-            searchResults = []
+            return
+        }
+
+        // Search all nearby stores in parallel
+        let results = await withTaskGroup(of: [KrogerProduct].self) { group in
+            for locationId in locationIds {
+                group.addTask { [krogerService] in
+                    (try? await krogerService.searchProducts(
+                        term: query,
+                        locationId: locationId,
+                        limit: 50
+                    )) ?? []
+                }
+            }
+            var all: [KrogerProduct] = []
+            for await batch in group {
+                all.append(contentsOf: batch)
+            }
+            return all
+        }
+
+        guard !Task.isCancelled else { return }
+
+        // Deduplicate by product ID, keeping the first occurrence
+        var seen = Set<String>()
+        searchResults = results.compactMap { product in
+            let inStore = product.items?.first?.fulfillment?.inStore ?? false
+            guard inStore, seen.insert(product.productId).inserted else { return nil }
+            return ProductResult(product: product, isAvailable: true)
+        }
+    }
+
+    func searchProducts(query: String) async -> [ProductResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let locationIds = nearbyLocationIds
+        if locationIds.isEmpty {
+            do {
+                let products = try await krogerService.searchProducts(term: trimmed, limit: 50)
+                return products.compactMap { product in
+                    let inStore = product.items?.first?.fulfillment?.inStore ?? false
+                    guard inStore else { return nil }
+                    return ProductResult(product: product, isAvailable: true)
+                }
+            } catch {
+                return []
+            }
+        }
+
+        let results = await withTaskGroup(of: [KrogerProduct].self) { group in
+            for locationId in locationIds {
+                group.addTask { [krogerService] in
+                    (try? await krogerService.searchProducts(term: trimmed, locationId: locationId, limit: 50)) ?? []
+                }
+            }
+            var all: [KrogerProduct] = []
+            for await batch in group { all.append(contentsOf: batch) }
+            return all
+        }
+
+        var seen = Set<String>()
+        return results.compactMap { product in
+            let inStore = product.items?.first?.fulfillment?.inStore ?? false
+            guard inStore, seen.insert(product.productId).inserted else { return nil }
+            return ProductResult(product: product, isAvailable: true)
         }
     }
 
@@ -145,11 +213,11 @@ class ShopViewModel {
     // MARK: - Cart Mutations
 
     func addToCart(product: KrogerProduct) {
-        let imageUrl = product.images.first?.sizes.last?.url ?? ""
+        let imageUrl = product.bestImageUrl ?? ""
         let item = CartItem(
             productId: product.productId,
             name: product.description,
-            brand: product.brand,
+            brand: product.brand ?? "",
             imageUrl: imageUrl,
             quantity: 1,
             substitutes: []
@@ -178,6 +246,38 @@ class ShopViewModel {
         guard cart.items.indices.contains(index) else { return }
         cart.items.remove(at: index)
         debounceSave()
+    }
+
+    // MARK: - Substitutes
+
+    func addSubstitute(to cartItemIndex: Int, product: KrogerProduct) {
+        guard cart.items.indices.contains(cartItemIndex) else { return }
+        let sub = Substitute(
+            productId: product.productId,
+            name: product.description,
+            brand: product.brand ?? ""
+        )
+        // Don't add duplicate substitutes
+        guard !cart.items[cartItemIndex].substitutes.contains(where: { $0.productId == sub.productId }) else { return }
+        cart.items[cartItemIndex].substitutes.append(sub)
+        debounceSave()
+    }
+
+    func removeSubstitute(from cartItemIndex: Int, substituteIndex: Int) {
+        guard cart.items.indices.contains(cartItemIndex),
+              cart.items[cartItemIndex].substitutes.indices.contains(substituteIndex) else { return }
+        cart.items[cartItemIndex].substitutes.remove(at: substituteIndex)
+        debounceSave()
+    }
+
+    var tripJustCompleted: Bool = false
+
+    func clearCart() {
+        saveTask?.cancel()
+        cart = Cart()
+        searchQuery = ""
+        searchResults = []
+        hasSearched = false
     }
 
     func updateQuantity(at index: Int, quantity: Int) {
@@ -231,10 +331,6 @@ extension ShopViewModel {
             ProductResult(
                 product: KrogerProduct(productId: "002", description: "Whole Milk, 1 Gallon", brand: "Kroger", images: [], items: [KrogerItemPrice(price: KrogerPrice(regular: 4.29, promo: 4.29), fulfillment: KrogerFulfillment(inStore: true))]),
                 isAvailable: true
-            ),
-            ProductResult(
-                product: KrogerProduct(productId: "003", description: "Avocados, 4 Count", brand: "Produce", images: [], items: [KrogerItemPrice(price: KrogerPrice(regular: 5.49, promo: 5.49), fulfillment: KrogerFulfillment(inStore: false))]),
-                isAvailable: false
             )
         ]
         vm.cart = Cart(items: [CartItem(productId: "001", name: "Organic Strawberries, 1 Lb", brand: "Simple Truth", imageUrl: "", quantity: 2, substitutes: [])])

@@ -294,17 +294,22 @@ private fun RunDetailMap(
 }
 
 private fun shareRun(run: CompletedRun, context: android.content.Context) {
-    val bitmap = ShareCardRenderer.render(run, context)
-    val file = File(context.cacheDir, "share_images/trip_${run.id}.png")
-    file.parentFile?.mkdirs()
-    file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "image/png"
-        putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        val mapBitmap = ShareCardRenderer.loadStaticMapBitmap(run.stores)
+        val bitmap = ShareCardRenderer.render(run, context, mapBitmap)
+        val file = File(context.cacheDir, "share_images/trip_${run.id}.png")
+        file.parentFile?.mkdirs()
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Share Shopping Trip"))
+        }
     }
-    context.startActivity(Intent.createChooser(intent, "Share Shopping Trip"))
 }
 
 /**

@@ -78,37 +78,40 @@ class RouteMapViewModel(
                 val stores = storesResponse.data
                 if (stores.isEmpty()) throw IllegalStateException("No nearby stores found")
 
-                // 4. For each store, query product availability
-                val storeAvailabilities = stores.mapNotNull { store ->
-                    try {
-                        val availableProducts = mutableMapOf<String, com.amoghghadge.cartquestandroid.data.model.KrogerProduct>()
-                        for (item in cartItems) {
-                            val allProductIds = listOf(item.productId) + item.substitutes.map { it.productId }
-                            for (pid in allProductIds) {
-                                if (availableProducts.containsKey(pid)) continue
-                                try {
-                                    val response = krogerApi.searchProducts(
-                                        auth = "Bearer $token",
-                                        term = pid,
-                                        locationId = store.locationId,
-                                        limit = 1
-                                    )
-                                    val product = response.data.firstOrNull { it.productId == pid }
-                                    if (product != null) {
-                                        availableProducts[pid] = product
+                // 4. For each store, query product availability (parallelized)
+                val allProductIds = cartItems.flatMap { item ->
+                    listOf(item.productId) + item.substitutes.map { it.productId }
+                }.distinct()
+
+                val storeAvailabilities = stores.map { store ->
+                    async {
+                        try {
+                            // Query all products for this store in parallel
+                            val productResults = allProductIds.map { pid ->
+                                async {
+                                    try {
+                                        val response = krogerApi.searchProducts(
+                                            auth = "Bearer $token",
+                                            term = pid,
+                                            locationId = store.locationId,
+                                            limit = 1
+                                        )
+                                        val product = response.data.firstOrNull { it.productId == pid }
+                                        if (product != null) pid to product else null
+                                    } catch (_: Exception) {
+                                        null
                                     }
-                                } catch (_: Exception) {
-                                    // skip product if query fails
                                 }
-                            }
+                            }.awaitAll().filterNotNull()
+
+                            if (productResults.isNotEmpty()) {
+                                RouteOptimizer.StoreAvailability(store, productResults.toMap())
+                            } else null
+                        } catch (_: Exception) {
+                            null
                         }
-                        if (availableProducts.isNotEmpty()) {
-                            RouteOptimizer.StoreAvailability(store, availableProducts)
-                        } else null
-                    } catch (_: Exception) {
-                        null
                     }
-                }
+                }.awaitAll().filterNotNull()
 
                 if (storeAvailabilities.isEmpty()) {
                     throw IllegalStateException("No stores have the requested products")
@@ -148,15 +151,14 @@ class RouteMapViewModel(
         val stops = state.route.stops
         if (stops.isEmpty()) return
 
-        val destination = stops.last()
-        val waypoints = if (stops.size > 1) {
-            stops.dropLast(1).joinToString("|") { "${it.lat},${it.lng}" }
-        } else null
+        val userLocation = state.userLocation
 
-        val uri = if (waypoints != null) {
-            Uri.parse("https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}&waypoints=$waypoints")
+        // Build Google Maps dir URL with all stops in route order
+        val pathStops = stops.joinToString("/") { "${it.lat},${it.lng}" }
+        val uri = if (stops.size > 1) {
+            Uri.parse("https://www.google.com/maps/dir/${userLocation.latitude},${userLocation.longitude}/$pathStops")
         } else {
-            Uri.parse("google.navigation:q=${destination.lat},${destination.lng}")
+            Uri.parse("google.navigation:q=${stops.first().lat},${stops.first().lng}")
         }
 
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {

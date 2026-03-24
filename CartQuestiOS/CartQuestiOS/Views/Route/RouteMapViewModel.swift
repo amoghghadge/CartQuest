@@ -92,39 +92,54 @@ class RouteMapViewModel {
                 return
             }
 
-            // 4. For each store, query product availability
-            var storeAvailabilities: [RouteOptimizer.StoreAvailability] = []
+            // 4. For each store, query product availability (parallelized)
             let allProductIds = activeCart.items.flatMap { item in
                 [item.productId] + item.substitutes.map { $0.productId }
             }
             let uniqueProductIds = Array(Set(allProductIds))
 
-            for store in stores {
-                var availableProducts: [String: KrogerProduct] = [:]
-                // Search for each product at this store location
-                for productId in uniqueProductIds {
-                    do {
-                        let results = try await krogerService.searchProducts(
-                            term: productId,
-                            locationId: store.locationId,
-                            limit: 1
-                        )
-                        if let product = results.first(where: { $0.productId == productId }) {
-                            availableProducts[productId] = product
+            let storeAvailabilities: [RouteOptimizer.StoreAvailability] = await withTaskGroup(
+                of: RouteOptimizer.StoreAvailability?.self
+            ) { group in
+                for store in stores {
+                    group.addTask { [krogerService] in
+                        // Query all products for this store in parallel
+                        let products: [(String, KrogerProduct)] = await withTaskGroup(
+                            of: (String, KrogerProduct?).self
+                        ) { productGroup in
+                            for productId in uniqueProductIds {
+                                productGroup.addTask {
+                                    do {
+                                        let results = try await krogerService.searchProducts(
+                                            term: productId,
+                                            locationId: store.locationId,
+                                            limit: 1
+                                        )
+                                        let match = results.first(where: { $0.productId == productId })
+                                        return (productId, match)
+                                    } catch {
+                                        return (productId, nil)
+                                    }
+                                }
+                            }
+                            var pairs: [(String, KrogerProduct)] = []
+                            for await (pid, product) in productGroup {
+                                if let product { pairs.append((pid, product)) }
+                            }
+                            return pairs
                         }
-                    } catch {
-                        // Skip product if query fails for this store
-                        continue
+
+                        guard !products.isEmpty else { return nil }
+                        let available = Dictionary(uniqueKeysWithValues: products)
+                        return RouteOptimizer.StoreAvailability(store: store, availableProducts: available)
                     }
                 }
-                if !availableProducts.isEmpty {
-                    storeAvailabilities.append(
-                        RouteOptimizer.StoreAvailability(
-                            store: store,
-                            availableProducts: availableProducts
-                        )
-                    )
+
+                var results: [RouteOptimizer.StoreAvailability] = []
+                for await availability in group {
+                    if let availability { results.append(availability) }
                 }
+                return results
             }
 
             // 5 & 6. Run optimizer
@@ -165,25 +180,22 @@ class RouteMapViewModel {
         let stops = route.stops
         guard !stops.isEmpty else { return }
 
-        // Build Google Maps URL with waypoints
-        let destination = stops.last!
-        let destinationStr = "\(destination.lat),\(destination.lng)"
+        // Build Google Maps URL with stops in route order
+        let allStopsStr = stops.map { "\($0.lat),\($0.lng)" }.joined(separator: "+to:")
 
         var urlString = "comgooglemaps://?saddr=\(userLocation.latitude),\(userLocation.longitude)"
-        urlString += "&daddr=\(destinationStr)"
-
-        if stops.count > 1 {
-            let waypointStops = stops.dropLast()
-            let waypointsStr = waypointStops.map { "\($0.lat),\($0.lng)" }.joined(separator: "+to:")
-            urlString += "+to:\(waypointsStr)"
-        }
-
+        urlString += "&daddr=\(allStopsStr)"
         urlString += "&directionsmode=driving"
 
         if let url = URL(string: urlString) {
             UIApplication.shared.open(url)
-        } else if let mapsUrl = URL(string: "https://www.google.com/maps/dir/?api=1&origin=\(userLocation.latitude),\(userLocation.longitude)&destination=\(destinationStr)&travelmode=driving") {
-            UIApplication.shared.open(mapsUrl)
+        } else {
+            // Fallback to web Google Maps with all stops in order
+            let pathStops = stops.map { "\($0.lat),\($0.lng)" }.joined(separator: "/")
+            let webUrl = "https://www.google.com/maps/dir/\(userLocation.latitude),\(userLocation.longitude)/\(pathStops)"
+            if let mapsUrl = URL(string: webUrl) {
+                UIApplication.shared.open(mapsUrl)
+            }
         }
     }
 

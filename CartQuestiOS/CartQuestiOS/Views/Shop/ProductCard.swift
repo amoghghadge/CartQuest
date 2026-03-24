@@ -44,8 +44,8 @@ struct ProductCard: View {
                 .fontWeight(.medium)
                 .lineLimit(2)
 
-            if !result.product.brand.isEmpty {
-                Text(result.product.brand)
+            if let brand = result.product.brand, !brand.isEmpty {
+                Text(brand)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -58,15 +58,7 @@ struct ProductCard: View {
 
             Spacer(minLength: 0)
 
-            if !result.isAvailable {
-                Text("Unavailable near you")
-                    .font(.subheadline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGray3))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else if cartQuantity > 0 {
+            if cartQuantity > 0 {
                 HStack {
                     Button(action: onDecrement) {
                         Image(systemName: "minus.circle.fill")

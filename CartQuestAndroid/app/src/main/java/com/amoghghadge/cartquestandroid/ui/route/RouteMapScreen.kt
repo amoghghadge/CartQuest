@@ -42,6 +42,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 @Composable
 fun RouteMapScreen(
     onNavigateBack: () -> Unit,
+    onTripCompleted: () -> Unit = {},
     viewModel: RouteMapViewModel = viewModel()
 ) {
     val routeState by viewModel.routeState.collectAsState()
@@ -50,7 +51,7 @@ fun RouteMapScreen(
 
     LaunchedEffect(tripCompleted) {
         if (tripCompleted) {
-            onNavigateBack()
+            onTripCompleted()
         }
     }
 

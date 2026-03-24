@@ -33,6 +33,7 @@ import com.amoghghadge.cartquestandroid.ui.shop.CartScreen
 import com.amoghghadge.cartquestandroid.ui.shop.ProductListScreen
 import com.amoghghadge.cartquestandroid.ui.shop.ShopHomeScreen
 import com.amoghghadge.cartquestandroid.ui.shop.ShopViewModel
+import com.amoghghadge.cartquestandroid.ui.shop.SubstituteSearchScreen
 
 @Composable
 fun AppNavigation(onLoggedOut: () -> Unit) {
@@ -118,6 +119,20 @@ fun AppNavigation(onLoggedOut: () -> Unit) {
                         onNavigateToRoute = { cartId ->
                             shopNavController.navigate(Screen.RouteMap.createRoute(cartId))
                         },
+                        onNavigateBack = { shopNavController.popBackStack() },
+                        onNavigateToSubstituteSearch = { cartItemIndex ->
+                            shopNavController.navigate(Screen.SubstituteSearch.createRoute(cartItemIndex))
+                        }
+                    )
+                }
+                composable(
+                    route = Screen.SubstituteSearch.route,
+                    arguments = listOf(navArgument("cartItemIndex") { type = NavType.IntType })
+                ) { backStackEntry ->
+                    val cartItemIndex = backStackEntry.arguments?.getInt("cartItemIndex") ?: 0
+                    SubstituteSearchScreen(
+                        viewModel = shopViewModel,
+                        cartItemIndex = cartItemIndex,
                         onNavigateBack = { shopNavController.popBackStack() }
                     )
                 }
@@ -126,7 +141,12 @@ fun AppNavigation(onLoggedOut: () -> Unit) {
                     arguments = listOf(navArgument("cartId") { type = NavType.StringType })
                 ) {
                     RouteMapScreen(
-                        onNavigateBack = { shopNavController.popBackStack() }
+                        onNavigateBack = { shopNavController.popBackStack() },
+                        onTripCompleted = {
+                            shopViewModel.clearCart()
+                            shopNavController.popBackStack(Screen.ShopHome.route, inclusive = false)
+                            selectedTab = 1
+                        }
                     )
                 }
             }

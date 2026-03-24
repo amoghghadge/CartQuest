@@ -5,9 +5,11 @@ import CoreLocation
 struct RouteMapView: View {
     @State private var viewModel: RouteMapViewModel
     @Environment(\.dismiss) private var dismiss
+    var onTripCompleted: (() -> Void)?
 
-    init(cartId: String) {
+    init(cartId: String, onTripCompleted: (() -> Void)? = nil) {
         _viewModel = State(initialValue: RouteMapViewModel(cartId: cartId))
+        self.onTripCompleted = onTripCompleted
     }
 
     var body: some View {
@@ -89,6 +91,7 @@ struct RouteMapView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: viewModel.tripCompleted) { _, completed in
             if completed {
+                onTripCompleted?()
                 dismiss()
             }
         }

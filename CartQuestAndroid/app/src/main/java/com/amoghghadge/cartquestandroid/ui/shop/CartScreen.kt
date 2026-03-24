@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -15,8 +16,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -26,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -44,7 +48,8 @@ import kotlinx.coroutines.launch
 fun CartScreen(
     viewModel: ShopViewModel,
     onNavigateToRoute: (String) -> Unit,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToSubstituteSearch: (Int) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
@@ -100,85 +105,156 @@ fun CartScreen(
                     .padding(innerPadding)
             ) {
                 itemsIndexed(state.cart.items) { index, item ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        AsyncImage(
-                            model = item.imageUrl,
-                            contentDescription = item.name,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = item.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 2
+                        // Main item row
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            AsyncImage(
+                                model = item.imageUrl,
+                                contentDescription = item.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                             )
-                            if (item.brand.isNotBlank()) {
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = item.brand,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = item.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 2
                                 )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (item.quantity == 1) {
-                                FilledIconButton(
-                                    onClick = { viewModel.removeFromCart(index) },
-                                    modifier = Modifier.size(32.dp),
-                                    colors = FilledIconButtonDefaults.filledIconButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.error
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Remove item"
+                                if (item.brand.isNotBlank()) {
+                                    Text(
+                                        text = item.brand,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                            } else {
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (item.quantity == 1) {
+                                    FilledIconButton(
+                                        onClick = { viewModel.removeFromCart(index) },
+                                        modifier = Modifier.size(32.dp),
+                                        colors = FilledIconButtonDefaults.filledIconButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                                            contentColor = MaterialTheme.colorScheme.error
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Remove item"
+                                        )
+                                    }
+                                } else {
+                                    FilledIconButton(
+                                        onClick = { viewModel.decrementQuantity(item.productId) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Remove,
+                                            contentDescription = "Decrease quantity"
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Text(
+                                    text = item.quantity.toString(),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
                                 FilledIconButton(
-                                    onClick = { viewModel.decrementQuantity(item.productId) },
+                                    onClick = { viewModel.incrementQuantity(item.productId) },
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Remove,
-                                        contentDescription = "Decrease quantity"
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Increase quantity"
                                     )
                                 }
                             }
+                        }
 
-                            Spacer(modifier = Modifier.width(8.dp))
-
+                        // Substitutes list
+                        if (item.substitutes.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = item.quantity.toString(),
-                                style = MaterialTheme.typography.bodyLarge
+                                text = "Substitutes",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 4.dp)
                             )
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            FilledIconButton(
-                                onClick = { viewModel.incrementQuantity(item.productId) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Increase quantity"
-                                )
+                            item.substitutes.forEachIndexed { subIndex, sub ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 4.dp, top = 2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SubdirectoryArrowRight,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = sub.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1
+                                        )
+                                        if (sub.brand.isNotBlank()) {
+                                            Text(
+                                                text = sub.brand,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeSubstitute(index, subIndex) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove substitute",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
+                        }
+
+                        // Add Substitute button
+                        TextButton(
+                            onClick = { onNavigateToSubstituteSearch(index) },
+                            modifier = Modifier.padding(start = 0.dp, top = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Substitute", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }

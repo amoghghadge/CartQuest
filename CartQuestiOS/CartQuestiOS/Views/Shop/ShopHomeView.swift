@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ShopHomeView: View {
     @Bindable var viewModel: ShopViewModel
+    var onTripCompleted: (() -> Void)?
     @State private var navigateToResults = false
 
     var body: some View {
@@ -45,7 +46,7 @@ struct ShopHomeView: View {
             Spacer()
         }
         .navigationDestination(isPresented: $navigateToResults) {
-            ProductListView(viewModel: viewModel)
+            ProductListView(viewModel: viewModel, onTripCompleted: onTripCompleted)
         }
     }
 }

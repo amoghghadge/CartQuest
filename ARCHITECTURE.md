@@ -33,15 +33,23 @@ The complete user journey through the app follows this sequence:
 
 2. SHOP (Tab 1: Shop)
    ShopHomeView/ShopHomeScreen displayed (Google-style centered search)
-   ├── On init: fetch nearest Kroger store for availability data
+   ├── On init: fetch up to 50 nearby Kroger stores (10-mile radius)
+   │   └── Store all location IDs in nearbyLocationIds array
    ├── Load active cart from Firestore (status == "active")
    │   └── If none exists, start with empty cart
-   ├── User types search → Kroger API call (location-aware, limit 50)
-   ├── Results shown in 2-column grid with availability badges
+   ├── User submits search → parallel Kroger API calls across all nearby stores
+   │   ├── Deduplicate results by productId (keep first occurrence)
+   │   └── Filter to only in-store available products
+   ├── Results shown in 2-column grid (availability pre-filtered)
    ├── User taps "Add to Cart" → Added to cart.items array
    ├── User adjusts quantity via stepper on product cards
+   ├── User can add substitutes per cart item:
+   │   ├── Tap "Add Substitute" → SubstituteSearchView/Screen
+   │   ├── Search reuses same multi-store parallel pipeline
+   │   ├── Select product → appended to cartItem.substitutes array
+   │   └── Substitutes displayed under each cart item with remove option
    ├── Every mutation → Debounced Firestore save (800ms iOS / 1000ms Android)
-   ├── Cart icon badge shows item count across all screens
+   ├── Cart icon badge shows total quantity (sum of all item quantities)
    └── User taps "Find Route" in CartView/CartScreen → Navigate to RouteMapView/Screen
 
 3. ROUTE OPTIMIZATION (RouteMapView/Screen)
@@ -49,23 +57,29 @@ The complete user journey through the app follows this sequence:
    ├── Load active cart from Firestore
    ├── Get user GPS location (CoreLocation / FusedLocationProvider)
    ├── Query Kroger API for 10 nearest stores (10-mile radius)
-   ├── For each store × each product: query availability
-   ├── Build coverage matrix
+   ├── For each store × each product: query availability (parallelized)
+   │   ├── Outer parallelism: all stores queried concurrently
+   │   └── Inner parallelism: all products per store queried concurrently
+   ├── Build coverage matrix (including substitute product IDs)
    ├── Enumerate minimum-cardinality store subsets
-   ├── For each feasible subset: query Google Directions API
+   ├── Pre-compute item assignments for each feasible subset (sync)
+   ├── For each feasible subset: query Google Directions API (parallelized)
    ├── Select route with minimum total drive time
-   ├── Assign items to stores (priority-based)
    └── Display on map with polyline + numbered markers
 
 4. NAVIGATION
    User taps "Start Navigation"
-   ├── iOS: Open Google Maps via comgooglemaps:// URL scheme
-   └── Android: Open Google Maps via Intent (ACTION_VIEW)
+   ├── iOS: Open Google Maps via comgooglemaps:// with all stops in route order
+   │   └── Fallback: https://www.google.com/maps/dir/{origin}/{stop1}/{stop2}/...
+   └── Android: Open Google Maps via /maps/dir/ path with all stops
+       └── Fallback: single-stop google.navigation:q= URI
    User taps "Complete Trip"
    ├── Calculate total cost from assigned item prices
    ├── Save CompletedRun to Firestore /runs collection
    ├── Mark cart as completed (status = "completed")
-   └── Navigate back to ShopHome (fresh cart)
+   ├── onTripCompleted callback propagates up to AppTabView/AppNavigation
+   ├── Cart cleared, Shop navigation stack reset
+   └── Auto-switch to Community tab (feed refreshed)
 
 5. COMMUNITY FEED (Tab 2: Community)
    CommunityFeedView/Screen displayed
@@ -76,12 +90,15 @@ The complete user journey through the app follows this sequence:
        ├── Load full run document
        ├── Display items grouped by store
        ├── Display mini map with store markers
-       └── Share button → Generate share card image → Native share sheet
+       └── Share button:
+           ├── Fetch Google Static Maps image (numbered markers + path)
+           ├── Render share card with map, stores, stats
+           └── Present native share sheet
 
 6. PROFILE (Tab 3: Profile)
    ProfileView/ProfileScreen displayed
    ├── Shows user avatar, display name, email from Firebase Auth
-   ├── Shows user ID (truncated) and email verification status
+   ├── Shows full user ID (middle-truncated) and email verification status
    └── "Log Out" button → Firebase signOut → returns to LoginView/LoginScreen
 ```
 
@@ -145,33 +162,39 @@ Google Sign-In Flow:
 
 ## Shop Flow: Search → Cart → Checkout
 
-The Shop tab uses a shared ViewModel (`ShopViewModel` on both platforms) that manages search state, cart state, and location-aware product availability across a 3-screen NavigationStack: ShopHomeView → ProductListView → CartView (iOS) / ShopHomeScreen → ProductListScreen → CartScreen (Android).
+The Shop tab uses a shared ViewModel (`ShopViewModel` on both platforms) that manages search state, cart state, substitute management, and location-aware product availability across a 4-screen NavigationStack: ShopHomeView → ProductListView → CartView → SubstituteSearchView (iOS) / ShopHomeScreen → ProductListScreen → CartScreen → SubstituteSearchScreen (Android). The `RouteMapView`/`RouteMapScreen` is also pushed from CartView/CartScreen.
 
-### Location-Aware Search
+### Location-Aware Multi-Store Search
 
-On ViewModel init, the nearest Kroger store is fetched using the device's GPS coordinates. This `nearbyLocationId` is passed to all subsequent product searches, enabling the Kroger API to return per-store fulfillment data (in-store availability).
+On ViewModel init, up to 50 nearby Kroger stores are fetched using the device's GPS coordinates (10-mile radius). All location IDs are stored in `nearbyLocationIds` (previously a single `nearbyLocationId`). This array is used to fan out product searches across all nearby stores in parallel, maximizing product discovery and availability accuracy.
 
 ### Search Pipeline
 
 ```
-User types in search bar (ShopHomeView) and hits Search
+User submits search (ShopHomeView/ShopHomeScreen)
     │
     ▼
 search() called
 ├── Cancel any in-flight searchTask
 ├── If query is empty → return
+├── If nearbyLocationIds is empty → fallback: search without location filter
 ├── Start new Task:
-│   └── Call krogerService.searchProducts(term: query, locationId: nearbyLocationId)
-│       ├── Ensure valid OAuth token (refresh if expired)
-│       ├── GET /v1/products?filter.term={query}&filter.locationId={id}&filter.limit=50
-│       └── Decode response → [KrogerProduct]
+│   └── Parallel fan-out across all nearbyLocationIds:
+│       ├── iOS: withTaskGroup(of: [KrogerProduct].self)
+│       │   └── For each locationId: krogerService.searchProducts(term, locationId, limit=50)
+│       └── Android: locationIds.map { async { krogerApi.searchProducts(...) } }.awaitAll()
+│   └── Flatten all results into single list
+│   └── Deduplicate by productId (keep first occurrence)
+│   └── Filter: only products where items.first.fulfillment.inStore == true
     │
     ▼
-searchResults mapped to [ProductResult] with isAvailable flag
+searchResults = deduplicated [ProductResult] (all confirmed in-store available)
     │
     ▼
-Navigate to ProductListView/ProductListScreen → 2-column grid with availability badges
+Navigate to ProductListView/ProductListScreen → 2-column grid (no availability badges needed — all results are available)
 ```
+
+The same parallel search pipeline is reused by `searchProducts(query:)` for the substitute search flow, which is called from `SubstituteSearchView`/`SubstituteSearchScreen`.
 
 ### Mutation Operations
 
@@ -179,11 +202,28 @@ All cart mutations follow the same pattern: mutate the in-memory `cart.items` ar
 
 | Operation | Behavior |
 |-----------|----------|
-| **Add item** | Append `CartItem` to `cart.items` with `productId`, `name`, `brand`, `imageUrl` from Kroger product |
+| **Add item** | Append `CartItem` to `cart.items` with `productId`, `name`, `brand`, `imageUrl` from Kroger product. Image URL selected via `bestImageUrl` (see Image Selection below) |
 | **Remove item** | Remove at index from `cart.items` (or decrement to 0) |
 | **Increment quantity** | `cart.items[index].quantity += 1` via stepper on product card |
 | **Decrement quantity** | If quantity is 1, remove item; otherwise `cart.items[index].quantity -= 1` |
 | **Update quantity** | Set `cart.items[index].quantity` directly; if < 1, remove item |
+| **Add substitute** | Append `Substitute(productId, name, brand)` to `cart.items[index].substitutes`. Duplicate check by productId. Triggered from SubstituteSearchView/Screen |
+| **Remove substitute** | Remove substitute at `substituteIndex` from `cart.items[cartItemIndex].substitutes` |
+| **Clear cart** | Cancel pending save, reset cart to empty `Cart()`, clear search state |
+
+### Image Selection (KrogerProduct.bestImageUrl)
+
+The Kroger API returns multiple images per product with varying perspectives and sizes. The `bestImageUrl` computed property implements a preference-ranked selection:
+
+```
+1. Find the first image with featured == true (if any)
+2. Fall back to the first image in the array
+3. Within the selected image, pick the best size by preference order:
+   xlarge → large → medium → small → thumbnail
+4. Fall back to the last size in the array if no preference match
+```
+
+This ensures the highest-quality image available is always displayed, preferring featured product photos over generic shots.
 
 ### Persistence Pipeline
 
@@ -227,15 +267,21 @@ computeRoute() [called on ViewModel init]
     ├── 3. Find stores: KrogerService.searchLocations(lat, lon, radius=10, limit=10)
     │   └── Returns up to 10 nearest Kroger-family stores
     │
-    ├── 4. Build availability matrix:
-    │   for each store:
-    │       for each unique productId in cart (primary + substitutes):
-    │           KrogerService.searchProducts(term=productId, locationId=store.locationId, limit=1)
-    │           if exact productId match found → add to store's availableProducts map
+    ├── 4. Build availability matrix (parallelized — two levels of concurrency):
+    │   ┌── Outer: all stores queried concurrently
+    │   │   iOS: withTaskGroup(of: StoreAvailability?.self)
+    │   │   Android: stores.map { async { ... } }.awaitAll()
+    │   └── Inner: all products per store queried concurrently
+    │       iOS: nested withTaskGroup(of: (String, KrogerProduct?).self)
+    │       Android: nested allProductIds.map { async { ... } }.awaitAll()
+    │   For each store × each unique productId (primary + substitutes):
+    │       KrogerService.searchProducts(term=productId, locationId=store.locationId, limit=1)
+    │       if exact productId match found → add to store's availableProducts map
+    │   Stores with zero available products are filtered out
     │   └── Result: [StoreAvailability(store, {productId: KrogerProduct})]
     │
     ├── 5. Optimize: RouteOptimizer.optimize(cartItems, storeAvailabilities, userLocation, getDriveTime)
-    │   └── getDriveTime callback:
+    │   └── getDriveTime callback (also parallelized across feasible subsets):
     │       DirectionsService.getDirections(origin, destination, waypoints=[intermediate stores])
     │       └── Google Directions API with optimize:true
     │       → returns (totalDurationSeconds, encodedPolyline)
@@ -291,20 +337,41 @@ func backtrack(start: Int, current: inout Set<Int>) {
 }
 ```
 
-**Step 4: Drive Time Evaluation**
+**Step 4: Pre-compute Item Assignments (Synchronous)**
 
-For each feasible subset, invoke `getDriveTime` which calls the Google Directions API. Track the minimum. If a particular Directions call fails (network error, invalid coordinates), skip that subset — this graceful degradation ensures one bad API response doesn't fail the entire optimization.
+Before making any network calls, item assignments are pre-computed for every feasible subset. This is done synchronously because it requires no I/O — just in-memory iteration over the coverage data:
 
-**Step 5: Item Assignment**
+```
+for each feasibleSubset:
+    sortedIndices = subset.sorted()
+    stops = assignItemsToStores(cartItems, sortedIndices, storeAvailabilities)
+    stores = sortedIndices.map(i → storeAvailabilities[i].store)
+    → store as (subset, stops, stores) tuple
+```
 
-For the winning subset, assign each cart item to the first store (in visit order) that carries it:
+**Step 5: Parallel Drive Time Evaluation**
+
+All feasible subsets are evaluated concurrently using structured concurrency:
+
+```
+iOS:   withTaskGroup(of: OptimizedRoute?.self)  → each subset gets its own child task
+Android: coroutineScope { feasibleSubsets.map { async { ... } }.awaitAll() }
+```
+
+Each task calls `getDriveTime(userLocation, stores)` → Google Directions API. Failed calls return `nil` and are filtered out. The route with the minimum `totalDriveTimeSeconds` is selected via `min(by:)` / `minByOrNull`.
+
+This parallelization is the key performance improvement: for C(10, 2) = 45 feasible subsets, wall-clock time drops from ~45 sequential API calls to approximately the latency of a single call.
+
+**Step 6: Item Assignment (Detail)**
+
+For each feasible subset, items are assigned to stores using greedy first-fit:
 
 ```
 for each cartItem:
     candidateProductIds = [cartItem.productId] + cartItem.substitutes.map(s.productId)
     for each storeIndex in winningSubset (visit order):
         if any candidateProductId in store's availableProducts:
-            assign item to this store
+            assign item to this store (with price from matched product)
             break
 ```
 
@@ -345,19 +412,28 @@ while index < polyline.endIndex {
 
 ### Navigation Handoff
 
+Both platforms construct deep-link URIs with **all stops in route order** — not just the final destination with intermediate waypoints.
+
 **iOS:**
 ```
-Primary:   comgooglemaps://?saddr={userLat},{userLng}&daddr={destLat},{destLng}+to:{wp1}+to:{wp2}&directionsmode=driving
-Fallback:  https://www.google.com/maps/dir/?api=1&origin={...}&destination={...}&travelmode=driving
+Primary:   comgooglemaps://?saddr={userLat},{userLng}&daddr={stop1Lat},{stop1Lng}+to:{stop2Lat},{stop2Lng}+to:{stop3Lat},{stop3Lng}&directionsmode=driving
+Fallback:  https://www.google.com/maps/dir/{userLat},{userLng}/{stop1Lat},{stop1Lng}/{stop2Lat},{stop2Lng}/{stop3Lat},{stop3Lng}
 ```
+
+All stops are chained with `+to:` in the `daddr` parameter. The fallback uses the `/maps/dir/` path format with each stop as a path segment.
 
 **Android:**
 ```kotlin
+// Multi-stop: /maps/dir/ path format
+val pathStops = stops.joinToString("/") { "${it.lat},${it.lng}" }
+val uri = Uri.parse("https://www.google.com/maps/dir/${userLocation.latitude},${userLocation.longitude}/$pathStops")
+
+// Single-stop: google.navigation direct launch
+val uri = Uri.parse("google.navigation:q=${stops.first().lat},${stops.first().lng}")
+
 val intent = Intent(Intent.ACTION_VIEW, uri).apply {
     setPackage("com.google.android.apps.maps")
 }
-// If Google Maps installed → launch directly
-// Otherwise → fallback to browser with same URI
 ```
 
 Both platforms prefer the Google Maps app for native turn-by-turn navigation and fall back to the web version if the app isn't installed.
@@ -403,12 +479,31 @@ This works well for the current scale (20 items loaded). For larger datasets, se
 | | iOS | Android |
 |--|-----|---------|
 | **Technology** | SwiftUI `ImageRenderer` | Android `Canvas` + `Paint` |
-| **Input** | `CompletedRun` model | `CompletedRun` model |
+| **Input** | `CompletedRun` + optional `UIImage` (map) | `CompletedRun` + optional `Bitmap` (map) |
 | **Output** | `UIImage?` (optional) | `Bitmap` |
 | **Layout** | Declarative SwiftUI view (`ShareCardView`) | Imperative canvas drawing with calculated Y positions |
-| **Dimensions** | 400pt wide, intrinsic height | 1080px wide, dynamically calculated height |
+| **Render scale** | 3× (fixed, device-independent) | 1080px wide, dynamically calculated height |
+| **Map image** | Google Static Maps API (async fetch) | Google Static Maps API (async fetch) |
+| **Card content** | App icon + title, date, map, numbered stores with item counts, stats (cost/items/time) | App icon + title, date, map, numbered stores with item counts, stats (cost/items/time) |
 | **Text truncation** | SwiftUI handles with `.lineLimit` | Manual `Paint.measureText()` + character trimming |
 | **Share mechanism** | `UIActivityViewController` via `UIViewControllerRepresentable` | `Intent.ACTION_SEND` + `FileProvider` URI |
+
+### Static Map Image
+
+Both platforms fetch a Google Static Maps image before rendering the share card:
+
+```
+GET https://maps.googleapis.com/maps/api/staticmap?
+    size=800x400
+    &maptype=roadmap
+    &scale=2
+    &markers=color:0x4285F4|label:1|{store1Lat},{store1Lng}
+    &markers=color:0x4285F4|label:2|{store2Lat},{store2Lng}
+    &path=color:0x4285F4ff|weight:3|{store1Lat},{store1Lng}|{store2Lat},{store2Lng}
+    &key={API_KEY}
+```
+
+The map shows numbered blue markers for each store and a connecting path. This is fetched asynchronously — the share button triggers the map fetch, then renders the card, then presents the share sheet. If the map fetch fails (network error, missing API key), the card renders without a map image.
 
 The **iOS approach** is more maintainable (the share card is a regular SwiftUI view, easy to iterate on), while the **Android approach** gives pixel-precise control (important for consistent rendering across device configurations and densities).
 
@@ -432,7 +527,9 @@ The **iOS approach** is more maintainable (the share card is a regular SwiftUI v
 | **Maps** | Google Maps iOS SDK (`GMSMapView`) | Maps Compose (`GoogleMap`) |
 | **Navigation** | `NavigationStack` + `NavigationLink` | Navigation Compose + sealed `Screen` class |
 | **Auth (Google)** | GoogleSignIn-iOS (pending) | Credential Manager API |
+| **Parallel I/O** | `withTaskGroup` (structured concurrency) | `async/awaitAll` + `coroutineScope` |
 | **Share** | `ImageRenderer` → `UIActivityViewController` | `Canvas` → `Bitmap` → `FileProvider` → `Intent` |
+| **Static Maps** | `URLSession` fetch → `UIImage` | `URL.openStream()` → `BitmapFactory.decodeStream` |
 | **Secrets** | `.xcconfig` → Build Settings | `.properties` → Gradle `buildConfigField` |
 | **Build system** | Xcode + SPM | Gradle Kotlin DSL + version catalogs |
 | **Min version** | iOS 17 | SDK 24 (Android 7.0) |
@@ -449,6 +546,7 @@ Swift's structured concurrency is used throughout:
 - **`Task.sleep(for:)`** — non-blocking sleep for debouncing (doesn't hold a thread)
 - **`Task.cancel()` + `Task.isCancelled`** — cooperative cancellation for search/save tasks
 - **`async throws`** — all service and repository methods are async, errors propagate naturally
+- **`withTaskGroup`** — parallel fan-out for multi-store product search, availability matrix building, and drive time evaluation. The `getDriveTime` callback is marked `@Sendable @escaping` to safely cross concurrency domains
 - **`[weak self]` in closures** — prevents retain cycles in `getDriveTime` callback passed to the optimizer
 
 The Kroger service uses `NSLock` for token synchronization because token refresh involves an `await` call — true actor isolation would require the entire service to be an actor, which complicates usage from non-isolated contexts. The lock scope is minimal (read check + write after refresh).
@@ -459,6 +557,8 @@ Kotlin coroutines with `viewModelScope`:
 
 - **`viewModelScope.launch { }`** — all ViewModel work runs in this scope, auto-cancelled on ViewModel clear
 - **`Dispatchers.IO`** — OkHttp synchronous calls (`execute()`) are wrapped in `withContext(Dispatchers.IO)` to avoid blocking the main thread
+- **`async/awaitAll`** — parallel fan-out for multi-store product search, availability matrix building, and drive time evaluation
+- **`coroutineScope { }`** — structured scope within `RouteOptimizer.optimize()` for parallel drive time evaluation without leaking coroutines
 - **`Mutex.withLock { }`** — token refresh in `KrogerAuthManager` is guarded by a coroutine-aware mutex (suspending, not blocking)
 - **`Flow.debounce()`** — built-in operator for search query debouncing in the feed ViewModel
 - **`combine()`** — merges search query and runs list flows for reactive filtering
@@ -481,9 +581,9 @@ Kotlin coroutines with `viewModelScope`:
 
 | Layer | Error Type | Handling |
 |-------|-----------|----------|
-| Kroger product search | `URLError` / OkHttp exception | Per-product `try/catch` — skip product, continue to next |
+| Kroger product search | `URLError` / OkHttp exception | Per-product `try/catch` within parallel task groups — skip product, continue. Failed stores return `nil` and are filtered out |
 | Kroger store query | `URLError` / OkHttp exception | Propagates to ViewModel → error state |
-| Directions API | HTTP error / JSON parse failure | Per-subset `try/catch` → skip subset, try next |
+| Directions API | HTTP error / JSON parse failure | Per-subset `try/catch` within parallel task group → return `nil`, filtered out. Route selected from successful candidates only |
 | Firestore | Generic `Error` / `Exception` | ViewModel catches, displays localized message |
 
 The per-product and per-subset error handling is intentionally lenient — a single failed API call shouldn't prevent route computation if other stores/subsets still produce valid routes.
@@ -517,7 +617,7 @@ interface KrogerApiService {
     suspend fun searchProducts(
         @Header("Authorization") auth: String,
         @Query("filter.term") term: String,
-        @Query("filter.locationId") locationId: String,
+        @Query("filter.locationId") locationId: String? = null,
         @Query("filter.limit") limit: Int = 50
     ): KrogerProductResponse
 
@@ -532,4 +632,22 @@ interface KrogerApiService {
 }
 ```
 
+Note: `locationId` is nullable — when no nearby stores are found, the search falls back to querying without a location filter (returning products without store-specific availability data).
+
 **Why Retrofit for Kroger but OkHttp for Directions?** Retrofit excels when you have multiple endpoints with shared base URL, authentication, and serialization — exactly the Kroger API case. The Directions API is a single endpoint with simpler JSON parsing needs, where raw OkHttp avoids defining a Retrofit interface for a single method. The `KrogerAuthManager` also uses raw OkHttp because the OAuth token endpoint has different content types and serialization from the main API.
+
+### Defensive API Response Handling
+
+The Kroger API returns inconsistent response shapes — some fields may be null or missing depending on the product. Both platforms use nullable types for API response models to prevent deserialization crashes:
+
+| Field | Previous | Current | Rationale |
+|-------|----------|---------|-----------|
+| `KrogerProduct.brand` | `String` | `String?` | Some products lack brand data |
+| `KrogerProduct.images` | `[KrogerImage]` | `[KrogerImage]?` | Products without images exist |
+| `KrogerProduct.items` | `[KrogerItemPrice]` | `[KrogerItemPrice]?` | Price/fulfillment data may be absent |
+| `KrogerPrice.regular` | `Double` | `Double?` | Prices not always available |
+| `KrogerPrice.promo` | `Double` | `Double?` | Promo pricing not always available |
+| `KrogerImage.perspective` | `String` | `String?` | Perspective label sometimes missing |
+| `KrogerImage.featured` | (new) | `Bool?` | Featured flag for preferred image selection |
+
+This defensive approach ensures the app gracefully handles the full range of API responses without crashing, using safe unwrapping (`??`, `?.`, `orEmpty()`) at every access point.

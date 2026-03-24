@@ -55,7 +55,7 @@ class RouteOptimizer {
         cartItems: [CartItem],
         storeAvailabilities: [StoreAvailability],
         userLocation: CLLocationCoordinate2D,
-        getDriveTime: (CLLocationCoordinate2D, [KrogerStore]) async throws -> (Int, String)
+        getDriveTime: @Sendable @escaping (CLLocationCoordinate2D, [KrogerStore]) async throws -> (Int, String)
     ) async throws -> OptimizedRoute {
         guard !cartItems.isEmpty else { throw RouteError.emptyCart }
         guard !storeAvailabilities.isEmpty else { throw RouteError.noStoresAvailable }
@@ -81,34 +81,44 @@ class RouteOptimizer {
 
         guard !feasibleSubsets.isEmpty else { throw RouteError.cannotCoverAll }
 
-        // Step 4: For each feasible subset, get drive time
-        var bestRoute: OptimizedRoute?
-        var bestTime = Int.max
-
-        for subset in feasibleSubsets {
-            let stores = subset.sorted().map { storeAvailabilities[$0].store }
-            do {
-                let (driveTime, polyline) = try await getDriveTime(userLocation, stores)
-                if driveTime < bestTime {
-                    bestTime = driveTime
-                    // Step 6: Assign items to stores
-                    let stops = assignItemsToStores(
-                        cartItems: cartItems,
-                        storeIndices: subset.sorted(),
-                        storeAvailabilities: storeAvailabilities
-                    )
-                    bestRoute = OptimizedRoute(
-                        stops: stops,
-                        totalDriveTimeSeconds: driveTime,
-                        encodedPolyline: polyline
-                    )
-                }
-            } catch {
-                continue // skip this subset if directions fails
-            }
+        // Pre-compute item assignments for each feasible subset (sync, no concurrency issues)
+        let subsetAssignments: [(subset: Set<Int>, stops: [StoreStop], stores: [KrogerStore])] = feasibleSubsets.map { subset in
+            let sortedIndices = subset.sorted()
+            let stops = assignItemsToStores(
+                cartItems: cartItems,
+                storeIndices: sortedIndices,
+                storeAvailabilities: storeAvailabilities
+            )
+            let stores = sortedIndices.map { storeAvailabilities[$0].store }
+            return (subset, stops, stores)
         }
 
-        guard let route = bestRoute else { throw RouteError.noRouteFound }
+        // Step 4: For each feasible subset, get drive time (parallelized)
+        let routeCandidates: [OptimizedRoute] = await withTaskGroup(of: OptimizedRoute?.self) { group in
+            for assignment in subsetAssignments {
+                group.addTask {
+                    do {
+                        let (driveTime, polyline) = try await getDriveTime(userLocation, assignment.stores)
+                        return OptimizedRoute(
+                            stops: assignment.stops,
+                            totalDriveTimeSeconds: driveTime,
+                            encodedPolyline: polyline
+                        )
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var results: [OptimizedRoute] = []
+            for await candidate in group {
+                if let candidate { results.append(candidate) }
+            }
+            return results
+        }
+
+        guard let route = routeCandidates.min(by: { $0.totalDriveTimeSeconds < $1.totalDriveTimeSeconds }) else {
+            throw RouteError.noRouteFound
+        }
         return route
     }
 
@@ -184,12 +194,12 @@ class RouteOptimizer {
                 let available = storeAvailabilities[storeIdx].availableProducts
                 if let matchedPid = productIds.first(where: { available.keys.contains($0) }) {
                     let product = available[matchedPid]!
-                    let price = product.items.first?.price?.regular ?? 0.0
+                    let price = product.items?.first?.price?.regular ?? 0.0
                     storeItems[storeIdx]!.append(
                         AssignedItem(
                             productId: matchedPid,
                             name: product.description,
-                            brand: product.brand,
+                            brand: product.brand ?? "",
                             price: price
                         )
                     )

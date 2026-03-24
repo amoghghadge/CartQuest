@@ -16,6 +16,7 @@ interface KrogerApiService {
         @Header("Authorization") auth: String,
         @Query("filter.term") term: String,
         @Query("filter.locationId") locationId: String? = null,
+        @Query("filter.fulfillment") fulfillment: String = "ais",
         @Query("filter.limit") limit: Int = 50
     ): KrogerProductResponse
 
@@ -25,7 +26,7 @@ interface KrogerApiService {
         @Query("filter.lat.near") lat: Double,
         @Query("filter.lon.near") lon: Double,
         @Query("filter.radiusInMiles") radius: Int = 10,
-        @Query("filter.limit") limit: Int = 10
+        @Query("filter.limit") limit: Int = 50
     ): KrogerLocationResponse
 
     companion object {

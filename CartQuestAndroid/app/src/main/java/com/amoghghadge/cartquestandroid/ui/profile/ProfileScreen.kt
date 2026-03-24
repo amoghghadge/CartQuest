@@ -51,7 +51,9 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            ListItem(headlineContent = { Text("User ID") }, supportingContent = { Text(state.uid.take(8) + "...") })
+            ListItem(headlineContent = { Text("User ID") }, supportingContent = {
+                Text(state.uid, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+            })
             ListItem(headlineContent = { Text("Email Verified") }, supportingContent = { Text(if (state.isEmailVerified) "Yes" else "No") })
 
             Spacer(modifier = Modifier.weight(1f))

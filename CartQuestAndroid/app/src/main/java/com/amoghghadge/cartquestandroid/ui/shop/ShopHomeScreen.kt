@@ -52,11 +52,16 @@ fun ShopHomeScreen(
             TopAppBar(
                 title = { },
                 actions = {
-                    IconButton(onClick = onNavigateToCart) {
+                    IconButton(
+                        onClick = onNavigateToCart,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
                         BadgedBox(
                             badge = {
                                 if (cartCount > 0) {
-                                    Badge { Text(cartCount.toString()) }
+                                    Badge(
+                                        modifier = Modifier.padding(2.dp)
+                                    ) { Text(cartCount.toString()) }
                                 }
                             }
                         ) {
