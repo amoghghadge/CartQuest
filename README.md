@@ -10,7 +10,9 @@ Both demos walk through the full user journey: **authentication → product sear
 
 ### iOS (Swift / SwiftUI)
 
-![CartQuest iOS Demo](ios.gif)
+
+
+![CarQuest iOS Demo](https://github.com/user-attachments/assets/de15b458-b4a8-40b9-a9f4-0edeab235f5c)
 
 ### Android (Kotlin / Jetpack Compose)
 
