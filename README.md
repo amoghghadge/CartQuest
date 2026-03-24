@@ -10,7 +10,7 @@ Both demos walk through the full user journey: **authentication → product sear
 
 ### iOS (Swift / SwiftUI)
 
-<div align="center">
+<div align="left">
 
 | iOS Demo |
 | :---: |
